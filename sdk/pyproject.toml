@@ -1,0 +1,34 @@
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labflow-sdk"
+version = "0.1.0"
+description = "Python SDK for Labflow experiment tracking"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "CC BY-NC-ND"
+dependencies = [
+    "httpx>=0.27,<1",
+    "psutil>=6,<9",
+    "nvidia-ml-py>=13.580,<14"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+    "build>=1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
