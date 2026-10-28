@@ -1,7 +1,6 @@
 package com.dju.labflow.auth.infrastructure.cookie;
 
 import com.dju.labflow.auth.infrastructure.jwt.JwtProperties;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +8,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 
+/** 인증 쿠키 생성과 삭제의 경로, HttpOnly, Secure, SameSite 속성을 일치시킨다. */
 @Component
 public class AuthCookieProvider {
 
@@ -18,16 +18,15 @@ public class AuthCookieProvider {
 
     private final Duration accessTokenExpiration;
 
-    public AuthCookieProvider(JwtProperties properties, Clock clock) {
+    private final boolean secure;
+    private final String sameSite;
+
+    public AuthCookieProvider(JwtProperties properties, AuthCookieProperties cookieProperties, Clock clock) {
         this.clock = clock;
         this.accessTokenExpiration = properties.accessTokenExpiration();
+        this.secure = cookieProperties.secure();
+        this.sameSite = cookieProperties.sameSite();
     }
-
-    @Value("${jwt.cookie.secure}")
-    private boolean secure;
-
-    @Value("${jwt.cookie.same-site}")
-    private String sameSite;
 
     public ResponseCookie createAccessTokenCookie(String accessToken) {
         return ResponseCookie.from(ACCESS_TOKEN_COOKIE_NAME, accessToken)

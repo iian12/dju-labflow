@@ -13,6 +13,7 @@ import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
+/** 요청 파라미터를 신뢰하지 않고 SecurityContext의 일반 사용자 인증 주체에서 ID를 추출한다. */
 @Component
 public class CurrentUserIdResolver implements HandlerMethodArgumentResolver {
 

@@ -7,6 +7,7 @@ import org.springframework.security.core.GrantedAuthority;
 import java.util.Collection;
 import java.util.List;
 
+/** 일반 사용자 요청의 인증 주체. 역할을 Spring Security 권한 문자열로 변환한다. */
 public record AppPrincipal(UserId userId, Role role) {
     public AppPrincipal {
         if (userId == null) {

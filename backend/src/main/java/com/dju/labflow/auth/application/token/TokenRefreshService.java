@@ -1,12 +1,12 @@
 package com.dju.labflow.auth.application.token;
 
 import com.dju.labflow.auth.domain.*;
+import com.dju.labflow.auth.application.AccountAccessPolicy;
 import com.dju.labflow.auth.domain.exception.InvalidRefreshTokenException;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.repository.UserRepository;
-import com.dju.labflow.user.exception.UserNotFoundException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 
+/** 리프레시 토큰을 잠금 조회한 뒤 계정 상태 확인, 기존 토큰 폐기, 새 토큰 저장을 원자적으로 수행한다. */
 @Service
 @Transactional(readOnly = true)
 public class TokenRefreshService {
@@ -63,7 +64,10 @@ public class TokenRefreshService {
         User user =
                 userRepository
                         .findById(currentToken.getUserId())
-                        .orElseThrow(UserNotFoundException::new);
+                        .orElseThrow(InvalidRefreshTokenException::new);
+
+        // 기존 토큰이 유효해도 계정 상태가 바뀌었다면 새 토큰을 발급하지 않는다.
+        AccountAccessPolicy.requireActive(user);
 
         currentToken.revoke(now);
 

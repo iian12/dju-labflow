@@ -1,11 +1,13 @@
 package com.dju.labflow.global.config;
 
 import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
+import com.dju.labflow.auth.infrastructure.cookie.AuthCookieProperties;
 import com.dju.labflow.global.handler.CustomAccessDeniedHandler;
 import com.dju.labflow.global.handler.CustomAuthenticationEntryPoint;
 import com.dju.labflow.global.handler.SpaCsrfTokenRequestHandler;
 import com.dju.labflow.project.key.infrastructure.security.ProjectApiKeyAuthenticationFilter;
 import jakarta.servlet.DispatcherType;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -23,6 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
+/** 쿠키 JWT와 SDK API 키 인증, CSRF, 공개 경로 및 보안 오류 응답을 구성한다. */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
@@ -31,15 +34,18 @@ public class SecurityConfig {
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
     private final ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter;
+    private final AuthCookieProperties cookieProperties;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           CustomAuthenticationEntryPoint authenticationEntryPoint,
                           CustomAccessDeniedHandler customAccessDeniedHandler,
-                          ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter) {
+                          ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
+                          AuthCookieProperties cookieProperties) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.customAccessDeniedHandler = customAccessDeniedHandler;
         this.projectApiKeyAuthenticationFilter = projectApiKeyAuthenticationFilter;
+        this.cookieProperties = cookieProperties;
     }
 
     @Bean
@@ -53,6 +59,8 @@ public class SecurityConfig {
         csrfTokenRepository.setCookieName("XSRF-TOKEN");
         csrfTokenRepository.setHeaderName("X-XSRF-TOKEN");
         csrfTokenRepository.setCookiePath("/");
+        csrfTokenRepository.setCookieCustomizer(cookie ->
+                cookie.secure(cookieProperties.secure()).sameSite(cookieProperties.sameSite()));
 
         http
                 .cors(Customizer.withDefaults())
@@ -76,6 +84,7 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         // CORS Preflight 요청
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
                         // 인증 관련 공개 API
                         .requestMatchers(
                                 "/api/v1/auth/sign-up",
@@ -94,6 +103,21 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /** 인증 필터는 SecurityFilterChain에서만 실행되도록 컨테이너 자동 등록을 끈다. */
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration() {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(jwtAuthenticationFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> apiKeyFilterRegistration() {
+        FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> registration = new FilterRegistrationBean<>(projectApiKeyAuthenticationFilter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean

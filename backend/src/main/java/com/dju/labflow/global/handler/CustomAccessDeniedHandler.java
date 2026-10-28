@@ -13,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 
+/** Security 필터 단계의 권한·CSRF 실패를 일관된 403 JSON 응답으로 변환한다. */
 @Component
 public class CustomAccessDeniedHandler implements AccessDeniedHandler {
 

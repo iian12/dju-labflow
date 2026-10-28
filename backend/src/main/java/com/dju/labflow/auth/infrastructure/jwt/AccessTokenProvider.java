@@ -18,6 +18,7 @@ import java.util.Objects;
 
 import javax.crypto.SecretKey;
 
+/** JWT 서명·검증과 만료 처리를 담당한다. 계정 차단 여부는 인증 필터가 별도로 확인한다. */
 @Component
 public class AccessTokenProvider {
 
@@ -55,6 +56,7 @@ public class AccessTokenProvider {
     public AccessTokenClaims parseAccessToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
+                .clock(() -> Date.from(clock.instant()))
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();

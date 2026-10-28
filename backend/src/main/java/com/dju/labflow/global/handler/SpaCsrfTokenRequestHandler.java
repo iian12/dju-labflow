@@ -10,6 +10,7 @@ import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler
 
 import java.util.function.Supplier;
 
+/** 응답은 XOR 보호를 유지하고 SPA의 헤더 입력은 쿠키 원문으로 검증한다. */
 public class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
 
 

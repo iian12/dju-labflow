@@ -17,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+/** SDK 경로의 Bearer API 키만 처리하고 일반 사용자 쿠키 인증과 분리한다. */
 @Component
 public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
 

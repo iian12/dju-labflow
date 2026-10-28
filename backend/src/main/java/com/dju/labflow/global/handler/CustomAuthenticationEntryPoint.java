@@ -12,6 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 
+/** Security 필터 단계의 미인증 요청을 일관된 401 JSON 응답으로 변환한다. */
 @Component
 public class CustomAuthenticationEntryPoint implements AuthenticationEntryPoint {
 

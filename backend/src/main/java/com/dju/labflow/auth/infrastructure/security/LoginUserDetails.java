@@ -1,6 +1,7 @@
 package com.dju.labflow.auth.infrastructure.security;
 
 import com.dju.labflow.user.domain.Role;
+import com.dju.labflow.user.domain.AccountStatus;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import org.jspecify.annotations.Nullable;
@@ -11,11 +12,13 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.util.Collection;
 import java.util.List;
 
+/** 비밀번호 인증에 필요한 사용자 정보와 계정 상태를 Spring Security에 전달한다. */
 public record LoginUserDetails(
         UserId userId,
         String email,
         String password,
-        Role role
+        Role role,
+        AccountStatus accountStatus
 ) implements UserDetails {
 
     public static LoginUserDetails from(User user) {
@@ -23,7 +26,8 @@ public record LoginUserDetails(
                 user.getId(),
                 user.getEmail(),
                 user.getEncodedPassword(),
-                user.getRole()
+                user.getRole(),
+                user.getAccountStatus()
         );
     }
 
@@ -48,7 +52,7 @@ public record LoginUserDetails(
 
     @Override
     public boolean isAccountNonLocked() {
-        return true;
+        return accountStatus != AccountStatus.BLOCKED;
     }
 
     @Override
@@ -58,7 +62,8 @@ public record LoginUserDetails(
 
     @Override
     public boolean isEnabled() {
-        return true;
+        // 이메일 인증 전 계정과 차단 계정은 새 인증을 시작할 수 없다.
+        return accountStatus == AccountStatus.ACTIVE;
     }
 
     @Override

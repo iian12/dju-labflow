@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 
+/** 암호학적 난수 32바이트로 리프레시 토큰을 생성하고 주입된 시계로 만료를 계산한다. */
 @Component
 public class RefreshTokenGenerator {
 
