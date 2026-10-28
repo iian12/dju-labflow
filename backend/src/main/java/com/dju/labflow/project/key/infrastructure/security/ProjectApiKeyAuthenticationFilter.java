@@ -6,6 +6,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
@@ -14,8 +15,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-
-import java.io.IOException;
 
 /** SDK 경로의 Bearer API 키만 처리하고 일반 사용자 쿠키 인증과 분리한다. */
 @Component
@@ -27,7 +26,9 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     private final AuthenticationEntryPoint authenticationEntryPoint;
 
-    public ProjectApiKeyAuthenticationFilter(ProjectApiKeyAuthenticationService authenticationService, AuthenticationEntryPoint authenticationEntryPoint) {
+    public ProjectApiKeyAuthenticationFilter(
+            ProjectApiKeyAuthenticationService authenticationService,
+            AuthenticationEntryPoint authenticationEntryPoint) {
         this.authenticationService = authenticationService;
         this.authenticationEntryPoint = authenticationEntryPoint;
     }
@@ -40,19 +41,25 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(
+            HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
         try {
             String rawApiKey = resolveApiKey(request);
 
             if (rawApiKey == null) {
-                authenticationEntryPoint.commence(request, response, new BadCredentialsException("Project API key is required"));
+                authenticationEntryPoint.commence(
+                        request,
+                        response,
+                        new BadCredentialsException("Project API key is required"));
 
                 return;
             }
 
             ProjectApiKeyPrincipal principal = authenticationService.authenticate(rawApiKey);
 
-            ProjectApiKeyAuthenticationToken authentication = new ProjectApiKeyAuthenticationToken(principal);
+            ProjectApiKeyAuthenticationToken authentication =
+                    new ProjectApiKeyAuthenticationToken(principal);
 
             SecurityContext context = SecurityContextHolder.createEmptyContext();
 
@@ -66,25 +73,16 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private String resolveApiKey(
-            HttpServletRequest request
-    ) {
+    private String resolveApiKey(HttpServletRequest request) {
 
-        String authorization =
-                request.getHeader(
-                        HttpHeaders.AUTHORIZATION
-                );
+        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
 
-        if (authorization == null ||
-                !authorization.startsWith(PREFIX)) {
+        if (authorization == null || !authorization.startsWith(PREFIX)) {
 
             return null;
         }
 
-        String rawApiKey =
-                authorization.substring(
-                        PREFIX.length()
-                ).trim();
+        String rawApiKey = authorization.substring(PREFIX.length()).trim();
 
         if (rawApiKey.isEmpty()) {
             return null;
@@ -92,5 +90,4 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
         return rawApiKey;
     }
-
 }

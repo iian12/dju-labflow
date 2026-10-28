@@ -16,8 +16,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "users")
 public class UserEntity extends AssignedIdEntity {
 
-    @Version
-    private Long version;
+    @Version private Long version;
 
     @Column(unique = true, nullable = false, updatable = false, length = 254)
     private String email;
@@ -53,11 +52,7 @@ public class UserEntity extends AssignedIdEntity {
     }
 
     public void update(
-            String encodedPassword,
-            String name,
-            Role role,
-            AccountStatus accountStatus
-    ) {
+            String encodedPassword, String name, Role role, AccountStatus accountStatus) {
         this.encodedPassword = encodedPassword;
         this.name = name;
         this.role = role;

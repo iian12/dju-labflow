@@ -9,22 +9,20 @@ import com.dju.labflow.auth.domain.RefreshTokenRepository;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.security.LoginUserDetails;
 import com.dju.labflow.global.id.IdGenerator;
+import com.dju.labflow.global.validation.InputValidation;
+import com.dju.labflow.global.validation.RequestValidator;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import com.dju.labflow.user.exception.DuplicateEmailException;
-import com.dju.labflow.global.validation.InputValidation;
-import com.dju.labflow.global.validation.RequestValidator;
-
+import java.time.Clock;
+import java.time.Instant;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Clock;
-import java.time.Instant;
 
 /** 회원가입과 비밀번호 로그인을 조정하고 토큰 발급을 하나의 트랜잭션으로 처리한다. */
 @Service

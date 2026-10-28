@@ -1,5 +1,7 @@
 package com.dju.labflow;
 
+import static org.assertj.core.api.Assertions.*;
+
 import com.dju.labflow.auth.infrastructure.persistence.RefreshTokenEntity;
 import com.dju.labflow.global.id.AssignedIdEntity;
 import com.dju.labflow.project.key.domain.*;
@@ -22,8 +24,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
-import static org.assertj.core.api.Assertions.*;
-
 /** 스키마의 실제 제약·인덱스와 할당 ID 엔티티의 영속성 생명주기를 검증한다. */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -36,15 +36,35 @@ class PersistenceInfrastructureTests {
     @ParameterizedTest
     @ValueSource(strings = {"user", "project", "key", "refresh"})
     void assignedEntityStopsBeingNewAfterPersistAndLoad(String kind) {
-        AssignedIdEntity entity = switch (kind) {
-            case "user" -> UserEntity.builder().id(90L).email("lifecycle@example.test").name("test")
-                    .encodedPassword("encoded").role(Role.USER).accountStatus(AccountStatus.ACTIVE).build();
-            case "project" -> ProjectEntity.builder().id(90L).name("test").createdBy(1L)
-                    .visibility(ProjectVisibility.PRIVATE).createdAt(NOW).build();
-            case "key" -> keyEntity(90L, "a".repeat(64));
-            default -> RefreshTokenEntity.builder().id(90L).userId(1L).tokenHash("a".repeat(43))
-                    .expiresAt(NOW.plusSeconds(3600)).createdAt(NOW).build();
-        };
+        AssignedIdEntity entity =
+                switch (kind) {
+                    case "user" ->
+                            UserEntity.builder()
+                                    .id(90L)
+                                    .email("lifecycle@example.test")
+                                    .name("test")
+                                    .encodedPassword("encoded")
+                                    .role(Role.USER)
+                                    .accountStatus(AccountStatus.ACTIVE)
+                                    .build();
+                    case "project" ->
+                            ProjectEntity.builder()
+                                    .id(90L)
+                                    .name("test")
+                                    .createdBy(1L)
+                                    .visibility(ProjectVisibility.PRIVATE)
+                                    .createdAt(NOW)
+                                    .build();
+                    case "key" -> keyEntity(90L, "a".repeat(64));
+                    default ->
+                            RefreshTokenEntity.builder()
+                                    .id(90L)
+                                    .userId(1L)
+                                    .tokenHash("a".repeat(43))
+                                    .expiresAt(NOW.plusSeconds(3600))
+                                    .createdAt(NOW)
+                                    .build();
+                };
         assertThat(entity.isNew()).isTrue();
         em.persist(entity);
         em.flush();
@@ -65,27 +85,56 @@ class PersistenceInfrastructureTests {
     void keyHashAndProjectLookupHaveIndexesAndCorrectColumnConstraints() {
         List<String> indexedColumns = new ArrayList<>();
         List<String> uniqueColumns = new ArrayList<>();
-        em.unwrap(Session.class).doWork(connection -> {
-            try (var indexes = connection.getMetaData().getIndexInfo(null, null, "PROJECT_API_KEY_ENTITY", false, false)) {
-                while (indexes.next()) {
-                    indexedColumns.add(indexes.getString("COLUMN_NAME"));
-                    if (!indexes.getBoolean("NON_UNIQUE")) uniqueColumns.add(indexes.getString("COLUMN_NAME"));
-                }
-            }
-            try (var columns = connection.getMetaData().getColumns(null, null, "PROJECT_API_KEY_ENTITY", "KEY_HASH")) {
-                assertThat(columns.next()).isTrue();
-                assertThat(columns.getInt("COLUMN_SIZE")).isEqualTo(64);
-                assertThat(columns.getString("IS_NULLABLE")).isEqualTo("NO");
-            }
-        });
+        em.unwrap(Session.class)
+                .doWork(
+                        connection -> {
+                            try (var indexes =
+                                    connection
+                                            .getMetaData()
+                                            .getIndexInfo(
+                                                    null,
+                                                    null,
+                                                    "PROJECT_API_KEY_ENTITY",
+                                                    false,
+                                                    false)) {
+                                while (indexes.next()) {
+                                    indexedColumns.add(indexes.getString("COLUMN_NAME"));
+                                    if (!indexes.getBoolean("NON_UNIQUE"))
+                                        uniqueColumns.add(indexes.getString("COLUMN_NAME"));
+                                }
+                            }
+                            try (var columns =
+                                    connection
+                                            .getMetaData()
+                                            .getColumns(
+                                                    null,
+                                                    null,
+                                                    "PROJECT_API_KEY_ENTITY",
+                                                    "KEY_HASH")) {
+                                assertThat(columns.next()).isTrue();
+                                assertThat(columns.getInt("COLUMN_SIZE")).isEqualTo(64);
+                                assertThat(columns.getString("IS_NULLABLE")).isEqualTo("NO");
+                            }
+                        });
         assertThat(indexedColumns).contains("PROJECT_ID");
         assertThat(uniqueColumns).contains("KEY_HASH");
     }
 
     @Test
     void keyStateChangesUseUpdateAndPreserveSecretIdentity() {
-        ProjectApiKey key = keys.save(ProjectApiKey.create(ProjectApiKeyId.of(91L), ProjectId.of(1L), UserId.of(1L),
-                "test", "lfp_test", "b".repeat(64), ProjectApiKeyStatus.ACTIVE, NOW, null, null));
+        ProjectApiKey key =
+                keys.save(
+                        ProjectApiKey.create(
+                                ProjectApiKeyId.of(91L),
+                                ProjectId.of(1L),
+                                UserId.of(1L),
+                                "test",
+                                "lfp_test",
+                                "b".repeat(64),
+                                ProjectApiKeyStatus.ACTIVE,
+                                NOW,
+                                null,
+                                null));
         key.revoke(NOW.plusSeconds(10));
         keys.update(key);
         em.flush();
@@ -99,19 +148,40 @@ class PersistenceInfrastructureTests {
 
     @Test
     void saveOfExistingDomainDoesNotSilentlyMergeChanges() {
-        ProjectApiKey key = keys.save(ProjectApiKey.create(ProjectApiKeyId.of(91L), ProjectId.of(1L), UserId.of(1L),
-                "test", "lfp_test", "b".repeat(64), ProjectApiKeyStatus.ACTIVE, NOW, null, null));
+        ProjectApiKey key =
+                keys.save(
+                        ProjectApiKey.create(
+                                ProjectApiKeyId.of(91L),
+                                ProjectId.of(1L),
+                                UserId.of(1L),
+                                "test",
+                                "lfp_test",
+                                "b".repeat(64),
+                                ProjectApiKeyStatus.ACTIVE,
+                                NOW,
+                                null,
+                                null));
         em.flush();
         em.clear();
         key.revoke(NOW.plusSeconds(10));
-        assertThatThrownBy(() -> {
-            keys.save(key);
-            em.flush();
-        }).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(
+                        () -> {
+                            keys.save(key);
+                            em.flush();
+                        })
+                .isInstanceOf(RuntimeException.class);
     }
 
     private ProjectApiKeyEntity keyEntity(long id, String hash) {
-        return ProjectApiKeyEntity.builder().id(id).projectId(1L).createdBy(1L).name("test")
-                .keyPrefix("lfp_test").keyHash(hash).status(ProjectApiKeyStatus.ACTIVE).createdAt(NOW).build();
+        return ProjectApiKeyEntity.builder()
+                .id(id)
+                .projectId(1L)
+                .createdBy(1L)
+                .name("test")
+                .keyPrefix("lfp_test")
+                .keyHash(hash)
+                .status(ProjectApiKeyStatus.ACTIVE)
+                .createdAt(NOW)
+                .build();
     }
 }

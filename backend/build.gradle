@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.diffplug.spotless' version '8.10.4'
 }
 
 group = 'com'
@@ -52,4 +53,16 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// Google Java Format의 AOSP 스타일(들여쓰기 4칸)을 main/test Java 소스에 동일하게 적용한다.
+// spotlessCheck는 check/build에 연결되며, 자동 수정은 spotlessApply로 명시적으로 실행한다.
+spotless {
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat().aosp()
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
 }

@@ -4,12 +4,10 @@ import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import com.dju.labflow.user.exception.UserNotFoundException;
-
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 사용자 저장소의 JPA 어댑터. 수정 시 관리 중인 엔티티에 역할·상태·프로필을 반영한다. */
 @Repository
@@ -40,7 +38,8 @@ public class UserRepositoryImpl implements UserRepository {
                         .orElseThrow(UserNotFoundException::new);
 
         // 도메인에서 변경된 권한도 관리 중인 엔티티에 반영한다.
-        entity.update(user.getEncodedPassword(), user.getName(), user.getRole(), user.getAccountStatus());
+        entity.update(
+                user.getEncodedPassword(), user.getName(), user.getRole(), user.getAccountStatus());
     }
 
     @Override

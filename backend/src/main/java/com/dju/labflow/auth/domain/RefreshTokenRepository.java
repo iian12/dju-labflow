@@ -1,7 +1,6 @@
 package com.dju.labflow.auth.domain;
 
 import com.dju.labflow.user.domain.UserId;
-
 import java.time.Instant;
 import java.util.Optional;
 
@@ -18,10 +17,7 @@ public interface RefreshTokenRepository {
     Optional<RefreshToken> findByTokenHashForUpdate(String tokenHash);
 
     // 아직 폐기되지 않은 Refresh Token 삭제
-    void revoke(
-            RefreshTokenId refreshTokenId,
-            Instant revokedAt
-    );
+    void revoke(RefreshTokenId refreshTokenId, Instant revokedAt);
 
     // 특정 Refresh Token 삭제
     void delete(RefreshTokenId refreshTokenId);

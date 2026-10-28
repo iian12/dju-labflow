@@ -7,9 +7,7 @@ import com.dju.labflow.user.domain.UserId;
 /** 프로젝트 도메인과 저장 모델 사이에서 식별자와 시간 정보를 보존해 변환한다. */
 public class ProjectMapper {
 
-    private ProjectMapper() {
-
-    }
+    private ProjectMapper() {}
 
     public static ProjectEntity toEntity(Project domain) {
         return ProjectEntity.builder()
@@ -31,7 +29,6 @@ public class ProjectMapper {
                 UserId.of(entity.getCreatedBy()),
                 entity.getVisibility(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt()
-        );
+                entity.getUpdatedAt());
     }
 }

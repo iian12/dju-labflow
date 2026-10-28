@@ -1,10 +1,9 @@
 package com.dju.labflow.project.key.infrastructure.security;
 
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-
-import java.util.List;
 
 /** 검증을 통과한 프로젝트 API 키를 Spring Security 인증 객체로 표현한다. */
 public class ProjectApiKeyAuthenticationToken extends AbstractAuthenticationToken {

@@ -19,12 +19,17 @@ public class CurrentUserIdResolver implements HandlerMethodArgumentResolver {
 
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
-        return parameter.hasParameterAnnotation(CurrentUserId.class) &&
-                UserId.class.isAssignableFrom(parameter.getParameterType());
+        return parameter.hasParameterAnnotation(CurrentUserId.class)
+                && UserId.class.isAssignableFrom(parameter.getParameterType());
     }
 
     @Override
-    public @Nullable Object resolveArgument(MethodParameter parameter, @Nullable ModelAndViewContainer mavContainer, NativeWebRequest webRequest, @Nullable WebDataBinderFactory binderFactory) throws Exception {
+    public @Nullable Object resolveArgument(
+            MethodParameter parameter,
+            @Nullable ModelAndViewContainer mavContainer,
+            NativeWebRequest webRequest,
+            @Nullable WebDataBinderFactory binderFactory)
+            throws Exception {
         CurrentUserId ann = parameter.getParameterAnnotation(CurrentUserId.class);
         boolean required = ann == null || ann.required();
 

@@ -20,8 +20,7 @@ public class UserService {
 
     @Transactional
     public void activateAccountStatus(UserId userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(UserNotFoundException::new);
+        User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
         user.activate();
         userRepository.update(user);

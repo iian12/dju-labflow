@@ -1,18 +1,16 @@
 package com.dju.labflow.auth.application.token;
 
-import com.dju.labflow.auth.domain.*;
 import com.dju.labflow.auth.application.AccountAccessPolicy;
+import com.dju.labflow.auth.domain.*;
 import com.dju.labflow.auth.domain.exception.InvalidRefreshTokenException;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.repository.UserRepository;
-
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.Clock;
 import java.time.Instant;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 리프레시 토큰을 잠금 조회한 뒤 계정 상태 확인, 기존 토큰 폐기, 새 토큰 저장을 원자적으로 수행한다. */
 @Service

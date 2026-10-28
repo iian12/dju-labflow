@@ -4,10 +4,9 @@ import com.dju.labflow.auth.domain.exception.AlreadyRevokedRefreshTokenException
 import com.dju.labflow.auth.domain.exception.ExpiredRefreshTokenException;
 import com.dju.labflow.auth.domain.exception.RevokedRefreshTokenException;
 import com.dju.labflow.user.domain.UserId;
-import lombok.Getter;
-
 import java.time.Instant;
 import java.util.Objects;
+import lombok.Getter;
 
 /** 리프레시 토큰의 만료와 폐기 상태를 관리하는 도메인. 원문 대신 해시만 보관한다. */
 @Getter
@@ -26,7 +25,13 @@ public class RefreshToken {
 
     private Instant revokedAt;
 
-    private RefreshToken(RefreshTokenId id, UserId userId, String tokenHash, Instant expiresAt, Instant createdAt, Instant revokedAt) {
+    private RefreshToken(
+            RefreshTokenId id,
+            UserId userId,
+            String tokenHash,
+            Instant expiresAt,
+            Instant createdAt,
+            Instant revokedAt) {
         this.id = id;
         this.userId = Objects.requireNonNull(userId);
         this.tokenHash = Objects.requireNonNull(tokenHash);
@@ -35,13 +40,25 @@ public class RefreshToken {
         this.revokedAt = revokedAt;
     }
 
-    public static RefreshToken create(RefreshTokenId id, UserId userId, String tokenHash, Instant expiresAt, Instant createdAt) {
-        if (!expiresAt.isAfter(createdAt)) throw new IllegalArgumentException("Refresh token expiration must be after creation.");
+    public static RefreshToken create(
+            RefreshTokenId id,
+            UserId userId,
+            String tokenHash,
+            Instant expiresAt,
+            Instant createdAt) {
+        if (!expiresAt.isAfter(createdAt))
+            throw new IllegalArgumentException("Refresh token expiration must be after creation.");
 
         return new RefreshToken(id, userId, tokenHash, expiresAt, createdAt, null);
     }
 
-    public static RefreshToken restore(RefreshTokenId id, UserId userId, String tokenHash, Instant expiresAt, Instant createdAt, Instant revokedAt) {
+    public static RefreshToken restore(
+            RefreshTokenId id,
+            UserId userId,
+            String tokenHash,
+            Instant expiresAt,
+            Instant createdAt,
+            Instant revokedAt) {
         return new RefreshToken(id, userId, tokenHash, expiresAt, createdAt, revokedAt);
     }
 
@@ -56,10 +73,7 @@ public class RefreshToken {
     }
 
     public void revoke(Instant revokedAt) {
-        Objects.requireNonNull(
-                revokedAt,
-                "revokedAt must not be null."
-        );
+        Objects.requireNonNull(revokedAt, "revokedAt must not be null.");
 
         if (isRevoked()) {
             throw new AlreadyRevokedRefreshTokenException();

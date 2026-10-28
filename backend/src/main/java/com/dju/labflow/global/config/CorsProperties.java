@@ -15,10 +15,13 @@ public record CorsProperties(List<String> allowedOrigins) {
         for (String origin : allowedOrigins) {
             URI uri = URI.create(origin);
             if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
-                    || uri.getHost() == null || uri.getUserInfo() != null
+                    || uri.getHost() == null
+                    || uri.getUserInfo() != null
                     || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
-                    || uri.getQuery() != null || uri.getFragment() != null) {
-                throw new IllegalArgumentException("CORS origins must be exact HTTP(S) origins without paths");
+                    || uri.getQuery() != null
+                    || uri.getFragment() != null) {
+                throw new IllegalArgumentException(
+                        "CORS origins must be exact HTTP(S) origins without paths");
             }
         }
     }

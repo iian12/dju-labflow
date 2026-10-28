@@ -1,9 +1,8 @@
 package com.dju.labflow.user.domain;
 
-import java.util.Objects;
 import com.dju.labflow.global.validation.InputValidation;
-
 import com.dju.labflow.user.exception.NotAdminException;
+import java.util.Objects;
 import lombok.Getter;
 
 /** 사용자의 프로필, 비밀번호 해시, 역할과 계정 상태 전이를 관리하는 도메인. */

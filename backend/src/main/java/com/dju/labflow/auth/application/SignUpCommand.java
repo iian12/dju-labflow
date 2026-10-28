@@ -9,5 +9,4 @@ public record SignUpCommand(
         @NotBlank @Email @Size(max = 254) String email,
         @NotBlank @Size(min = 8, max = 72) String password,
         @NotBlank @Size(min = 8, max = 72) String confirmPassword,
-        @NotBlank @Size(max = 100) String name) {
-}
+        @NotBlank @Size(max = 100) String name) {}

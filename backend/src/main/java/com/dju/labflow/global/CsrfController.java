@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "CSRF", description = "브라우저의 CSRF 초기화")
 public class CsrfController {
     @GetMapping("/api/v1/auth/csrf")
-    @Operation(summary = "CSRF 초기화", description = "XSRF-TOKEN 쿠키를 설정합니다. 변경 요청에는 쿠키 원문을 X-XSRF-TOKEN 헤더로 전송하세요.")
+    @Operation(
+            summary = "CSRF 초기화",
+            description = "XSRF-TOKEN 쿠키를 설정합니다. 변경 요청에는 쿠키 원문을 X-XSRF-TOKEN 헤더로 전송하세요.")
     @SecurityRequirements
     public void csrf(CsrfToken csrfToken) {
         // 토큰을 응답 본문으로 반환하지 않고 쿠키를 기준으로 클라이언트와 연동한다.

@@ -11,10 +11,6 @@ public record ProjectCreateRequest(
         @Size(max = 2000) String description,
         @NotNull ProjectVisibility visibility) {
     public ProjectCreateCommand toCommand() {
-        return new ProjectCreateCommand(
-                name,
-                description,
-                visibility
-        );
+        return new ProjectCreateCommand(name, description, visibility);
     }
 }

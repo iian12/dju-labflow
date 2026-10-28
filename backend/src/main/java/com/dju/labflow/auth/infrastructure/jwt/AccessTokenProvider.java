@@ -3,20 +3,16 @@ package com.dju.labflow.auth.infrastructure.jwt;
 import com.dju.labflow.auth.domain.AccessTokenClaims;
 import com.dju.labflow.user.domain.Role;
 import com.dju.labflow.user.domain.UserId;
-
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-
-import org.springframework.stereotype.Component;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Objects;
-
 import javax.crypto.SecretKey;
+import org.springframework.stereotype.Component;
 
 /** JWT 서명·검증과 만료 처리를 담당한다. 계정 차단 여부는 인증 필터가 별도로 확인한다. */
 @Component
@@ -40,9 +36,7 @@ public class AccessTokenProvider {
         Objects.requireNonNull(role, "Role must not be null.");
 
         Instant issuedAt = clock.instant();
-        Instant expiresAt = issuedAt.plusMillis(
-                accessTokenExpirationMillis
-        );
+        Instant expiresAt = issuedAt.plusMillis(accessTokenExpirationMillis);
 
         return Jwts.builder()
                 .subject(userId.value().toString())
@@ -54,12 +48,13 @@ public class AccessTokenProvider {
     }
 
     public AccessTokenClaims parseAccessToken(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(key)
-                .clock(() -> Date.from(clock.instant()))
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+        Claims claims =
+                Jwts.parser()
+                        .verifyWith(key)
+                        .clock(() -> Date.from(clock.instant()))
+                        .build()
+                        .parseSignedClaims(token)
+                        .getPayload();
 
         UserId userId = UserId.of(Long.parseLong(claims.getSubject()));
 
@@ -74,16 +69,10 @@ public class AccessTokenProvider {
         try {
             role = Role.valueOf(roleClaim);
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException(
-                    "Invalid role claim: " + roleClaim,
-                    exception
-            );
+            throw new IllegalArgumentException("Invalid role claim: " + roleClaim, exception);
         }
 
-        return new AccessTokenClaims(
-                userId,
-                role
-        );
+        return new AccessTokenClaims(userId, role);
     }
 
     public long getExpirationSeconds() {

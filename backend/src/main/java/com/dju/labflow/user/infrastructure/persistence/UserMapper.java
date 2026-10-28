@@ -29,7 +29,6 @@ public class UserMapper {
                 entity.getEncodedPassword(),
                 entity.getName(),
                 entity.getRole(),
-                entity.getAccountStatus()
-        );
+                entity.getAccountStatus());
     }
 }

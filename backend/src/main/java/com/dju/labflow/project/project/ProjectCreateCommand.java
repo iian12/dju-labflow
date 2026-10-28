@@ -9,5 +9,4 @@ import jakarta.validation.constraints.Size;
 public record ProjectCreateCommand(
         @NotBlank @Size(max = 100) String name,
         @Size(max = 2000) String description,
-        @NotNull ProjectVisibility visibility) {
-}
+        @NotNull ProjectVisibility visibility) {}

@@ -1,13 +1,11 @@
 package com.dju.labflow.auth.application.token;
 
 import com.dju.labflow.auth.infrastructure.jwt.JwtProperties;
-
-import org.springframework.stereotype.Component;
-
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
+import org.springframework.stereotype.Component;
 
 /** 암호학적 난수 32바이트로 리프레시 토큰을 생성하고 주입된 시계로 만료를 계산한다. */
 @Component

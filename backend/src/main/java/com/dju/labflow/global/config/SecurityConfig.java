@@ -1,7 +1,7 @@
 package com.dju.labflow.global.config;
 
-import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
 import com.dju.labflow.auth.infrastructure.cookie.AuthCookieProperties;
+import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
 import com.dju.labflow.global.handler.CustomAccessDeniedHandler;
 import com.dju.labflow.global.handler.CustomAuthenticationEntryPoint;
 import com.dju.labflow.global.handler.SpaCsrfTokenRequestHandler;
@@ -36,11 +36,12 @@ public class SecurityConfig {
     private final ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter;
     private final AuthCookieProperties cookieProperties;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
-                          CustomAuthenticationEntryPoint authenticationEntryPoint,
-                          CustomAccessDeniedHandler customAccessDeniedHandler,
-                          ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
-                          AuthCookieProperties cookieProperties) {
+    public SecurityConfig(
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            CustomAuthenticationEntryPoint authenticationEntryPoint,
+            CustomAccessDeniedHandler customAccessDeniedHandler,
+            ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
+            AuthCookieProperties cookieProperties) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.customAccessDeniedHandler = customAccessDeniedHandler;
@@ -50,7 +51,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        CookieCsrfTokenRepository csrfTokenRepository =
+                CookieCsrfTokenRepository.withHttpOnlyFalse();
 
         /*
          * React가 읽는 쿠키 이름: XSRF-TOKEN
@@ -59,44 +61,68 @@ public class SecurityConfig {
         csrfTokenRepository.setCookieName("XSRF-TOKEN");
         csrfTokenRepository.setHeaderName("X-XSRF-TOKEN");
         csrfTokenRepository.setCookiePath("/");
-        csrfTokenRepository.setCookieCustomizer(cookie ->
-                cookie.secure(cookieProperties.secure()).sameSite(cookieProperties.sameSite()));
+        csrfTokenRepository.setCookieCustomizer(
+                cookie ->
+                        cookie.secure(cookieProperties.secure())
+                                .sameSite(cookieProperties.sameSite()));
 
-        http
-                .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf
-                        .csrfTokenRepository(csrfTokenRepository)
-                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
-                        // 매 요청시마다 CSRF 토큰 재발급 방지
-                        .sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
-                        .ignoringRequestMatchers("/api/v1/auth/sign-up", "/api/v1/auth/login", "/api/v1/sdk/**"))
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        http.cors(Customizer.withDefaults())
+                .csrf(
+                        csrf ->
+                                csrf.csrfTokenRepository(csrfTokenRepository)
+                                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
+                                        // 매 요청시마다 CSRF 토큰 재발급 방지
+                                        .sessionAuthenticationStrategy(
+                                                new NullAuthenticatedSessionStrategy())
+                                        .ignoringRequestMatchers(
+                                                "/api/v1/auth/sign-up",
+                                                "/api/v1/auth/login",
+                                                "/api/v1/sdk/**"))
+                .sessionManagement(
+                        session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .requestCache(AbstractHttpConfigurer::disable)
-                .exceptionHandling(exception -> exception
-                        .authenticationEntryPoint(authenticationEntryPoint)
-                        .accessDeniedHandler(customAccessDeniedHandler))
-                .authorizeHttpRequests(authorize -> authorize
-                        // 에러 디스패치가 Security에 다시 막히는 것 방지
-                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        // CORS Preflight 요청
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
-                        // 인증 관련 공개 API
-                        .requestMatchers(
-                                "/api/v1/auth/sign-up",
-                                "/api/v1/auth/login",
-                                "/api/v1/auth/refresh",
-                                "/api/v1/auth/logout",
-                                "/api/v1/auth/csrf"
-                        ).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/email-verify/**").permitAll()
-                        .anyRequest().authenticated())
-                .addFilterBefore(projectApiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .exceptionHandling(
+                        exception ->
+                                exception
+                                        .authenticationEntryPoint(authenticationEntryPoint)
+                                        .accessDeniedHandler(customAccessDeniedHandler))
+                .authorizeHttpRequests(
+                        authorize ->
+                                authorize
+                                        // 에러 디스패치가 Security에 다시 막히는 것 방지
+                                        .dispatcherTypeMatchers(DispatcherType.ERROR)
+                                        .permitAll()
+                                        // CORS Preflight 요청
+                                        .requestMatchers(HttpMethod.OPTIONS, "/**")
+                                        .permitAll()
+                                        .requestMatchers(
+                                                "/swagger-ui.html",
+                                                "/swagger-ui/**",
+                                                "/v3/api-docs",
+                                                "/v3/api-docs/**",
+                                                "/v3/api-docs.yaml")
+                                        .permitAll()
+                                        // 인증 관련 공개 API
+                                        .requestMatchers(
+                                                "/api/v1/auth/sign-up",
+                                                "/api/v1/auth/login",
+                                                "/api/v1/auth/refresh",
+                                                "/api/v1/auth/logout",
+                                                "/api/v1/auth/csrf")
+                                        .permitAll()
+                                        .requestMatchers(
+                                                HttpMethod.GET, "/api/v1/auth/email-verify/**")
+                                        .permitAll()
+                                        .anyRequest()
+                                        .authenticated())
+                .addFilterBefore(
+                        projectApiKeyAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(
+                        jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
@@ -108,14 +134,16 @@ public class SecurityConfig {
     /** 인증 필터는 SecurityFilterChain에서만 실행되도록 컨테이너 자동 등록을 끈다. */
     @Bean
     public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration() {
-        FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(jwtAuthenticationFilter);
+        FilterRegistrationBean<JwtAuthenticationFilter> registration =
+                new FilterRegistrationBean<>(jwtAuthenticationFilter);
         registration.setEnabled(false);
         return registration;
     }
 
     @Bean
     public FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> apiKeyFilterRegistration() {
-        FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> registration = new FilterRegistrationBean<>(projectApiKeyAuthenticationFilter);
+        FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> registration =
+                new FilterRegistrationBean<>(projectApiKeyAuthenticationFilter);
         registration.setEnabled(false);
         return registration;
     }

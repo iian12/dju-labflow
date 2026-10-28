@@ -10,6 +10,21 @@ Java 21 / Spring Boot 4.1 기반 백엔드입니다. 도메인과 JPA 엔티티�
 
 테스트는 `test` 프로필의 메모리 H2를 사용하므로 별도 MariaDB가 필요하지 않습니다. 운영 DB 설정은 변경하지 않습니다. H2 회귀 테스트는 인증, MVC, 영속성 변경을 확인하며 MariaDB 고유의 잠금/동시성 동작까지 보장하지는 않습니다.
 
+## Java 코드 포맷
+
+Spotless와 Google Java Format의 AOSP 스타일(들여쓰기 4칸)을 사용합니다. 적용 범위는 `src/**/*.java`로, main/test 소스 모두 포함합니다.
+
+```powershell
+# backend 폴더에서 전체 Java 소스 자동 정리
+.\gradlew.bat spotlessApply
+# 수정 없이 포맷 규칙 검사
+.\gradlew.bat spotlessCheck
+# 포맷 검사와 테스트를 포함한 빌드
+.\gradlew.bat build
+```
+
+`build`는 규칙 위반을 검사하며 파일을 자동 수정하지 않습니다. IDE의 별도 포맷터를 사용할 경우에도 커밋 전 `spotlessApply`를 실행해 프로젝트 규칙과 맞춥니다. 네이밍이나 패키지 설계 규칙은 포맷터의 적용 범위에 포함되지 않습니다.
+
 ## 계정 및 인증 정책
 
 | 계정 상태 | 비밀번호 로그인 | 토큰 갱신 | 기존 JWT / SDK 키 |

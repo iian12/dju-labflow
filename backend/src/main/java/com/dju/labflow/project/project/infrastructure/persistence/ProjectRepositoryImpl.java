@@ -3,12 +3,11 @@ package com.dju.labflow.project.project.infrastructure.persistence;
 import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
-
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 프로젝트 도메인을 JPA에 연결하고 트랜잭션 안에서 기존 엔티티를 갱신한다. */
 @Repository
@@ -16,7 +15,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
 
     private final ProjectJpaRepository jpaRepository;
 
-    public  ProjectRepositoryImpl(ProjectJpaRepository jpaRepository) {
+    public ProjectRepositoryImpl(ProjectJpaRepository jpaRepository) {
         this.jpaRepository = jpaRepository;
     }
 
@@ -27,22 +26,26 @@ public class ProjectRepositoryImpl implements ProjectRepository {
 
         ProjectEntity savedEntity = jpaRepository.save(ProjectMapper.toEntity(project));
         return ProjectMapper.toDomain(savedEntity);
-
     }
 
     @Override
     @Transactional
     public void update(Project project) {
-        ProjectEntity entity = jpaRepository.findById(project.getId().value())
-                .orElseThrow(ProjectNotFoundException::new);
-        entity.update(project.getName(), project.getDescription(), project.getVisibility(), project.getUpdatedAt());
+        ProjectEntity entity =
+                jpaRepository
+                        .findById(project.getId().value())
+                        .orElseThrow(ProjectNotFoundException::new);
+        entity.update(
+                project.getName(),
+                project.getDescription(),
+                project.getVisibility(),
+                project.getUpdatedAt());
     }
 
     @Override
     public Optional<Project> findById(ProjectId id) {
         if (id == null) return Optional.empty();
 
-        return jpaRepository.findById(id.value())
-                .map(ProjectMapper::toDomain);
+        return jpaRepository.findById(id.value()).map(ProjectMapper::toDomain);
     }
 }

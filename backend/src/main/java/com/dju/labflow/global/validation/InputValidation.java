@@ -30,7 +30,8 @@ public final class InputValidation {
     public static void password(String value) {
         text(value, "Password", 72);
         if (value.length() < 8 || value.getBytes(StandardCharsets.UTF_8).length > 72) {
-            throw new IllegalArgumentException("Password must be at least 8 characters and at most 72 UTF-8 bytes");
+            throw new IllegalArgumentException(
+                    "Password must be at least 8 characters and at most 72 UTF-8 bytes");
         }
     }
 }

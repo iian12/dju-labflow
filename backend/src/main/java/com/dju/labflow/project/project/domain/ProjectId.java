@@ -1,7 +1,6 @@
 package com.dju.labflow.project.project.domain;
 
 import jakarta.persistence.Embeddable;
-
 import java.io.Serializable;
 
 /** 프로젝트 식별자를 다른 도메인 ID와 구분하는 값 객체. */

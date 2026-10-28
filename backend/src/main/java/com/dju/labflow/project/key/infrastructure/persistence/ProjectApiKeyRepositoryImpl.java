@@ -2,12 +2,11 @@ package com.dju.labflow.project.key.infrastructure.persistence;
 
 import com.dju.labflow.project.key.domain.ProjectApiKey;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
-
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** API 키 도메인 저장소를 Spring Data JPA에 연결하는 어댑터. */
 @Repository
@@ -24,7 +23,8 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
     public ProjectApiKey save(ProjectApiKey projectApiKey) {
         Objects.requireNonNull(projectApiKey, "ProjectApiKey must not be null");
 
-        ProjectApiKeyEntity savedEntity = jpaRepository.save(ProjectApiKeyMapper.toEntity(projectApiKey));
+        ProjectApiKeyEntity savedEntity =
+                jpaRepository.save(ProjectApiKeyMapper.toEntity(projectApiKey));
 
         return ProjectApiKeyMapper.toDomain(savedEntity);
     }
@@ -33,10 +33,15 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
     @Transactional
     public void update(ProjectApiKey projectApiKey) {
         Objects.requireNonNull(projectApiKey, "ProjectApiKey must not be null");
-        ProjectApiKeyEntity entity = jpaRepository.findById(projectApiKey.getId().value())
-                .orElseThrow(ProjectApiKeyNotFoundException::new);
-        entity.update(projectApiKey.getName(), projectApiKey.getStatus(),
-                projectApiKey.getRevokedAt(), projectApiKey.getLastUsedAt());
+        ProjectApiKeyEntity entity =
+                jpaRepository
+                        .findById(projectApiKey.getId().value())
+                        .orElseThrow(ProjectApiKeyNotFoundException::new);
+        entity.update(
+                projectApiKey.getName(),
+                projectApiKey.getStatus(),
+                projectApiKey.getRevokedAt(),
+                projectApiKey.getLastUsedAt());
     }
 
     @Override
