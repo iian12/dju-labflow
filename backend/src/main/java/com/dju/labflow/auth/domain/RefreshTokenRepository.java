@@ -5,6 +5,7 @@ import com.dju.labflow.user.domain.UserId;
 import java.time.Instant;
 import java.util.Optional;
 
+/** 토큰 저장, 잠금 조회, 폐기 및 만료 데이터 정리의 영속성 계약. */
 public interface RefreshTokenRepository {
 
     // 새 Refresh Token 저장

@@ -7,6 +7,7 @@ import com.dju.labflow.user.exception.UserNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** 이메일 인증을 마친 사용자의 계정 활성화 상태 전이를 저장한다. */
 @Service
 @Transactional(readOnly = true)
 public class UserService {

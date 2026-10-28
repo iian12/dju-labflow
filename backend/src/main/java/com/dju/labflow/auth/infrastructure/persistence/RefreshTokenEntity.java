@@ -1,12 +1,14 @@
 package com.dju.labflow.auth.infrastructure.persistence;
 
 import jakarta.persistence.*;
+import com.dju.labflow.global.id.AssignedIdEntity;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
+/** 토큰 해시, 만료 및 폐기 시각의 JPA 저장 모델. 해시는 중복을 허용하지 않는다. */
 @Entity
 @Getter
 @NoArgsConstructor(access = lombok.AccessLevel.PROTECTED)
@@ -16,7 +18,8 @@ import java.time.Instant;
                 @Index(
                         name = "idx_refresh_token_user_id",
                         columnList = "user_id"
-                )
+                ),
+                @Index(name = "idx_refresh_token_expires_at", columnList = "expires_at")
         },
         uniqueConstraints = {
                 @UniqueConstraint(
@@ -25,17 +28,18 @@ import java.time.Instant;
                 )
         }
 )
-public class RefreshTokenEntity {
+public class RefreshTokenEntity extends AssignedIdEntity {
 
-    @Id
-    private Long id;
-
+    @Column(name = "user_id", nullable = false, updatable = false)
     private Long userId;
 
+    @Column(name = "token_hash", nullable = false, updatable = false, length = 43)
     private String tokenHash;
 
+    @Column(name = "expires_at", nullable = false, updatable = false)
     private Instant expiresAt;
 
+    @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     private Instant revokedAt;

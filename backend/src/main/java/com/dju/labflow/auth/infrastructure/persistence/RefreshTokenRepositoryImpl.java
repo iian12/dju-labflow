@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
+/** 토큰 저장소의 JPA 어댑터. 도메인 객체와 관리 중인 엔티티를 구분해 갱신한다. */
 @Repository
 public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
 
@@ -72,6 +73,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     }
 
     @Override
+    @Transactional
     public void delete(RefreshTokenId refreshTokenId) {
         jpaRepository.deleteById(
                 refreshTokenId.value()
@@ -79,6 +81,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     }
 
     @Override
+    @Transactional
     public void deleteAllByUserId(UserId userId) {
         Objects.requireNonNull(userId, "User Id must not be null");
 
@@ -88,6 +91,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     }
 
     @Override
+    @Transactional
     public void deleteExpiredTokens(Instant now) {
         Objects.requireNonNull(now);
 

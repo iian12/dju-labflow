@@ -6,6 +6,7 @@ import com.dju.labflow.user.domain.UserId;
 
 import java.util.Objects;
 
+/** 토큰 도메인과 JPA 엔티티를 변환하고 변경 가능한 폐기 시각만 갱신한다. */
 public class RefreshTokenMapper {
     private RefreshTokenMapper() {
         /* This utility class should not be instantiated */

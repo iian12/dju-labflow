@@ -6,6 +6,7 @@ import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.user.domain.UserId;
 import lombok.Getter;
 
+/** 프로젝트 API 키 도메인과 JPA 저장 모델 사이의 명시적 필드 변환. */
 @Getter
 public class ProjectApiKeyMapper {
 

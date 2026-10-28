@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
 import java.util.Optional;
 
+/** 사용자 저장소의 JPA 어댑터. 수정 시 관리 중인 엔티티에 역할·상태·프로필을 반영한다. */
 @Repository
 public class UserRepositoryImpl implements UserRepository {
 
@@ -38,7 +39,8 @@ public class UserRepositoryImpl implements UserRepository {
                         .findById(user.getId().value())
                         .orElseThrow(UserNotFoundException::new);
 
-        entity.update(user.getEncodedPassword(), user.getName(), user.getAccountStatus());
+        // 도메인에서 변경된 권한도 관리 중인 엔티티에 반영한다.
+        entity.update(user.getEncodedPassword(), user.getName(), user.getRole(), user.getAccountStatus());
     }
 
     @Override

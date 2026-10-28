@@ -6,7 +6,9 @@ import lombok.Getter;
 
 import java.time.Instant;
 import java.util.Objects;
+import com.dju.labflow.global.validation.InputValidation;
 
+/** 프로젝트 API 키의 식별 정보와 폐기 상태를 관리한다. 키 원문은 보관하지 않는다. */
 @Getter
 public class ProjectApiKey {
     private final ProjectApiKeyId id;
@@ -21,14 +23,14 @@ public class ProjectApiKey {
     private Instant lastUsedAt;
 
     private ProjectApiKey(ProjectApiKeyId id, ProjectId projectId, UserId createdBy, String name, String keyPrefix, String keyHash, ProjectApiKeyStatus status, Instant createdAt, Instant revokedAt, Instant lastUsedAt) {
-        this.id = id;
-        this.projectId = projectId;
-        this.createdBy = createdBy;
-        this.name = name;
-        this.keyPrefix = keyPrefix;
-        this.keyHash = keyHash;
-        this.status = status;
-        this.createdAt = createdAt;
+        this.id = InputValidation.required(id, "API key ID");
+        this.projectId = InputValidation.required(projectId, "Project ID");
+        this.createdBy = InputValidation.required(createdBy, "Key owner");
+        this.name = InputValidation.text(name, "API key name", 100);
+        this.keyPrefix = InputValidation.text(keyPrefix, "Key prefix", 32);
+        this.keyHash = InputValidation.text(keyHash, "Key hash", 64);
+        this.status = InputValidation.required(status, "Key status");
+        this.createdAt = InputValidation.required(createdAt, "Creation time");
         this.revokedAt = revokedAt;
         this.lastUsedAt = lastUsedAt;
     }

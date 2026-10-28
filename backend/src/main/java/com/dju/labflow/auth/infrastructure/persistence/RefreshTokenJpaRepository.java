@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.Optional;
 
+/** 토큰 조회와 삭제 쿼리. 회전 시에는 쓰기 잠금으로 같은 토큰의 동시 사용을 직렬화한다. */
 public interface RefreshTokenJpaRepository extends JpaRepository<RefreshTokenEntity, Long> {
 
     Optional<RefreshTokenEntity> findByTokenHash(String tokenHash);

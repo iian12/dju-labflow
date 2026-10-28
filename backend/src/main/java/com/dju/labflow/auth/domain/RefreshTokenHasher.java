@@ -8,6 +8,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Objects;
 
+/** 조회 가능한 SHA-256 해시로 리프레시 토큰 원문을 대체한다. */
 @Component
 public class RefreshTokenHasher {
 

@@ -1,10 +1,12 @@
 package com.dju.labflow.user.domain;
 
 import java.util.Objects;
+import com.dju.labflow.global.validation.InputValidation;
 
 import com.dju.labflow.user.exception.NotAdminException;
 import lombok.Getter;
 
+/** 사용자의 프로필, 비밀번호 해시, 역할과 계정 상태 전이를 관리하는 도메인. */
 @Getter
 public class User {
 
@@ -23,9 +25,9 @@ public class User {
             Role role,
             AccountStatus accountStatus) {
         this.id = Objects.requireNonNull(id);
-        this.email = Objects.requireNonNull(email);
-        this.encodedPassword = Objects.requireNonNull(encodedPassword);
-        this.name = Objects.requireNonNull(name);
+        this.email = InputValidation.text(email, "Email", 254);
+        this.encodedPassword = InputValidation.text(encodedPassword, "Encoded password", 255);
+        this.name = InputValidation.text(name, "Name", 100);
         this.role = Objects.requireNonNull(role);
         this.accountStatus = Objects.requireNonNull(accountStatus);
     }
@@ -47,14 +49,11 @@ public class User {
     }
 
     public void changeName(String name) {
-        if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("Invalid name");
-        }
-        this.name = name;
+        this.name = InputValidation.text(name, "Name", 100);
     }
 
     public void changePassword(String encodedPassword) {
-        this.encodedPassword = encodedPassword;
+        this.encodedPassword = InputValidation.text(encodedPassword, "Encoded password", 255);
     }
 
     public void activate() {

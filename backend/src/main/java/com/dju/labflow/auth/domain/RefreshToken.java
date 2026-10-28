@@ -9,6 +9,7 @@ import lombok.Getter;
 import java.time.Instant;
 import java.util.Objects;
 
+/** 리프레시 토큰의 만료와 폐기 상태를 관리하는 도메인. 원문 대신 해시만 보관한다. */
 @Getter
 public class RefreshToken {
 

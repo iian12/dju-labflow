@@ -3,6 +3,7 @@ package com.dju.labflow.user.infrastructure.persistence;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 
+/** 사용자 도메인과 JPA 엔티티 사이에서 역할과 계정 상태를 포함한 필드를 변환한다. */
 public class UserMapper {
     private UserMapper() {
         /* This utility class should not be instantiated */
