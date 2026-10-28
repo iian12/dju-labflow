@@ -81,7 +81,7 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 이메일 인증 코드는 다음 계층으로 구분합니다.
 
 - `auth/application/verification`: 인증 서비스, 코드 생성/HMAC, 메일 발송 인터페이스와 발송 요청 이벤트
-- `auth/domain`: `EmailVerificationToken`과 저장소 계약 `EmailVerificationRepository`
+- `auth/domain`: `EmailVerification`과 저장소 계약 `EmailVerificationRepository`
 - `auth/domain/exception`: 인증 실패 예외
 - `auth/infrastructure/persistence`: 엔티티, `EmailVerificationMapper`, `EmailVerificationJpaRepository`, `EmailVerificationRepositoryImpl`
 - `auth/infrastructure/mail`: SMTP 발송 구현과 커밋 후 발송 리스너

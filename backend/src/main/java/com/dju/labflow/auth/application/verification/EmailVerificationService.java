@@ -1,7 +1,7 @@
 package com.dju.labflow.auth.application.verification;
 
+import com.dju.labflow.auth.domain.EmailVerification;
 import com.dju.labflow.auth.domain.EmailVerificationRepository;
-import com.dju.labflow.auth.domain.EmailVerificationToken;
 import com.dju.labflow.auth.domain.exception.InvalidVerificationCodeException;
 import com.dju.labflow.user.domain.AccountStatus;
 import com.dju.labflow.user.domain.User;
@@ -40,7 +40,7 @@ public class EmailVerificationService {
     public void issue(User user) {
         String code = generator.generate();
         tokens.save(
-                EmailVerificationToken.issue(
+                EmailVerification.issue(
                         user.getId().value(),
                         hasher.hash(user.getId().value(), code),
                         clock.instant()));
@@ -51,7 +51,7 @@ public class EmailVerificationService {
     public void resend(String email) {
         User user = users.findByEmail(email).orElse(null);
         if (user == null || user.getAccountStatus() != AccountStatus.PENDING_VERIFICATION) return;
-        EmailVerificationToken token = tokens.findForUpdate(user.getId().value()).orElse(null);
+        EmailVerification token = tokens.findForUpdate(user.getId().value()).orElse(null);
         if (token == null || !token.canResend(clock.instant())) return;
         String code = generator.generate();
         token.resend(hasher.hash(user.getId().value(), code), clock.instant());
@@ -62,7 +62,7 @@ public class EmailVerificationService {
     @Transactional(noRollbackFor = InvalidVerificationCodeException.class)
     public void verify(String email, String input) {
         User user = users.findByEmail(email).orElseThrow(InvalidVerificationCodeException::new);
-        EmailVerificationToken token =
+        EmailVerification token =
                 tokens.findForUpdate(user.getId().value())
                         .orElseThrow(InvalidVerificationCodeException::new);
         if (user.getAccountStatus() != AccountStatus.PENDING_VERIFICATION

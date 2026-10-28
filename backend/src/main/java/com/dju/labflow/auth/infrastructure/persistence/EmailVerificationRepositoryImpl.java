@@ -1,7 +1,7 @@
 package com.dju.labflow.auth.infrastructure.persistence;
 
+import com.dju.labflow.auth.domain.EmailVerification;
 import com.dju.labflow.auth.domain.EmailVerificationRepository;
-import com.dju.labflow.auth.domain.EmailVerificationToken;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
@@ -19,18 +19,18 @@ public class EmailVerificationRepositoryImpl implements EmailVerificationReposit
     }
 
     @Override
-    public void save(EmailVerificationToken token) {
+    public void save(EmailVerification token) {
         jpaRepository.save(EmailVerificationMapper.toEntity(token));
     }
 
     @Override
-    public Optional<EmailVerificationToken> findForUpdate(Long userId) {
+    public Optional<EmailVerification> findForUpdate(Long userId) {
         Objects.requireNonNull(userId, "User ID must not be null");
         return jpaRepository.findByUserIdForUpdate(userId).map(EmailVerificationMapper::toDomain);
     }
 
     @Override
-    public void update(EmailVerificationToken token) {
+    public void update(EmailVerification token) {
         Objects.requireNonNull(token, "Email verification token must not be null");
         EmailVerificationEntity entity =
                 jpaRepository

@@ -12,8 +12,8 @@ import com.dju.labflow.auth.application.SignUpCommand;
 import com.dju.labflow.auth.application.verification.EmailVerificationCodeGenerator;
 import com.dju.labflow.auth.application.verification.EmailVerificationService;
 import com.dju.labflow.auth.application.verification.VerificationEmailSender;
+import com.dju.labflow.auth.domain.EmailVerification;
 import com.dju.labflow.auth.domain.EmailVerificationRepository;
-import com.dju.labflow.auth.domain.EmailVerificationToken;
 import com.dju.labflow.auth.domain.exception.InvalidVerificationCodeException;
 import com.dju.labflow.auth.infrastructure.persistence.EmailVerificationJpaRepository;
 import com.dju.labflow.auth.infrastructure.persistence.EmailVerificationMapper;
@@ -84,7 +84,7 @@ class EmailVerificationTests {
                                 transactions.executeWithoutResult(
                                         status -> {
                                             verificationRepository.save(
-                                                    EmailVerificationToken.issue(
+                                                    EmailVerification.issue(
                                                             userId, "replacement", Instant.now()));
                                             verificationJpaRepository.flush();
                                         }))
@@ -237,7 +237,7 @@ class EmailVerificationTests {
             assertThat(actual.generate()).matches("(?=.*[A-Z])(?=.*[2-9])[A-HJKMNP-Z2-9]{6}");
         }
         Instant now = Instant.parse("2026-10-29T00:00:00Z");
-        var token = EmailVerificationToken.issue(1L, "hash", now);
+        var token = EmailVerification.issue(1L, "hash", now);
         assertThat(token.usable(now.plusSeconds(600))).isFalse();
         for (int i = 1; i <= 4; i++) token.resend("hash", now.plusSeconds(60L * i));
         assertThat(token.canResend(now.plusSeconds(300))).isFalse();
