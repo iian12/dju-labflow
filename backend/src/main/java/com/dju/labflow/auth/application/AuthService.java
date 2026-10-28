@@ -2,6 +2,7 @@ package com.dju.labflow.auth.application;
 
 import com.dju.labflow.auth.application.token.IssuedRefreshToken;
 import com.dju.labflow.auth.application.token.RefreshTokenGenerator;
+import com.dju.labflow.auth.application.verification.EmailVerificationService;
 import com.dju.labflow.auth.domain.RefreshToken;
 import com.dju.labflow.auth.domain.RefreshTokenHasher;
 import com.dju.labflow.auth.domain.RefreshTokenId;
@@ -39,6 +40,7 @@ public class AuthService {
     private final RefreshTokenHasher refreshTokenHasher;
     private final PasswordEncoder passwordEncoder;
     private final RequestValidator requestValidator;
+    private final EmailVerificationService emailVerificationService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -50,7 +52,8 @@ public class AuthService {
             Clock clock,
             RefreshTokenHasher refreshTokenHasher,
             PasswordEncoder passwordEncoder,
-            RequestValidator requestValidator) {
+            RequestValidator requestValidator,
+            EmailVerificationService emailVerificationService) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
         this.refreshTokenGenerator = refreshTokenGenerator;
@@ -61,6 +64,7 @@ public class AuthService {
         this.refreshTokenHasher = refreshTokenHasher;
         this.passwordEncoder = passwordEncoder;
         this.requestValidator = requestValidator;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Transactional
@@ -85,6 +89,7 @@ public class AuthService {
                         command.name());
 
         User savedUser = userRepository.save(user);
+        emailVerificationService.issue(savedUser);
         return savedUser.getId();
     }
 

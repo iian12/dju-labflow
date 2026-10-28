@@ -19,7 +19,7 @@ public class OpenApiConfig {
                                 .title("LabFlow Backend API")
                                 .version("v1")
                                 .description(
-                                        "구현된 HTTP API만 표시합니다. 회원가입/로그인/프로젝트 생성은 현재 서비스 계층만 구현되어 있습니다. "
+                                        "회원가입과 이메일 코드 인증 API를 제공합니다. 로그인/프로젝트 생성은 현재 서비스 계층만 구현되어 있습니다. "
                                                 + "ACTIVE 계정만 인증할 수 있으며 계정 차단 및 권한 변경은 다음 요청부터 반영됩니다. "
                                                 + "쿠키 인증 요청은 access_token 쿠키를 사용하고, 변경 요청에는 X-XSRF-TOKEN 헤더가 필요합니다. "
                                                 + "Swagger UI에서는 먼저 CSRF 조회 API를 실행하면 CSRF 쿠키를 읽어 헤더에 전달합니다."))

@@ -114,7 +114,9 @@ public class SecurityConfig {
                                                 "/api/v1/auth/csrf")
                                         .permitAll()
                                         .requestMatchers(
-                                                HttpMethod.GET, "/api/v1/auth/email-verify/**")
+                                                HttpMethod.POST,
+                                                "/api/v1/auth/email-verifications/verify",
+                                                "/api/v1/auth/email-verifications/resend")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())

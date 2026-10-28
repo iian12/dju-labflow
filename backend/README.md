@@ -53,9 +53,41 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/api/v1/auth/csrf` | CSRF 쿠키 초기화. 로그인 불필요 |
+| POST | `/api/v1/auth/sign-up` | 미인증 회원 생성 및 코드 발송 요청 (201) |
+| POST | `/api/v1/auth/email-verifications/verify` | 코드 검증 후 계정 활성화 (204) |
+| POST | `/api/v1/auth/email-verifications/resend` | 코드 재발송 요청 (202) |
 | POST | `/api/v1/project-api-keys/issue/{projectId}` | 프로젝트 소유자의 API 키 발급 |
 
-회원가입·로그인·토큰 갱신·프로젝트 생성은 서비스 계층만 구현되어 있으므로 아직 HTTP API로 호출할 수 없습니다. 이메일 인증 API도 아직 구현되지 않았습니다. 이 문서에서는 존재하지 않는 엔드포인트를 제공하는 것처럼 표시하지 않습니다.
+로그인·토큰 갱신·프로젝트 생성은 서비스 계층만 구현되어 있으므로 아직 HTTP API로 호출할 수 없습니다.
+
+### 이메일 코드로 회원가입
+
+1. `POST /api/v1/auth/sign-up`에 `email`, `password`, `confirmPassword`, `name`을 보냅니다.
+2. 이메일로 받은 6자리 영문/숫자 코드를 입력합니다. I/L/O/0/1은 생성하지 않습니다.
+3. `GET /api/v1/auth/csrf`로 CSRF 쿠키를 받은 뒤, 쿠키와 `X-XSRF-TOKEN` 헤더를 함께 전송합니다.
+4. `POST /api/v1/auth/email-verifications/verify`에 `{"email":"user@example.com","code":"A2B3C4"}`를 보냅니다. 성공하면 계정이 ACTIVE로 바뀝니다. 자동 로그인하지 않습니다.
+5. 미수신 시 `POST /api/v1/auth/email-verifications/resend`에 `{"email":"user@example.com"}`를 보냅니다. 이 요청에도 CSRF가 필요합니다.
+
+코드는 10분간 유효하고 대소문자를 구분하지 않으며 앞뒤 공백을 제거합니다. 실패 5회 후 잠기며, 재발송하면 이전 코드는 무효화됩니다. 재발송은 60초 간격이고 최초 발송을 포함해 계정당 시간당 5회로 제한합니다. 가입/재발송은 IP당 시간당 합계 10회, 검증은 100회입니다. IP 제한은 프로세스 메모리에 있으므로 재시작 시 초기화되며 여러 서버를 운영할 때는 게이트웨이 등에서 공통 제한이 필요합니다. 프록시 환경에서는 신뢰하는 프록시만 원격 주소를 설정하도록 구성해야 합니다.
+
+검증 실패는 400, IP 제한 초과는 429입니다. 재발송은 계정 존재·상태 및 계정별 제한 여부를 노출하지 않고 항상 202를 반환합니다. 202는 메일 도착을 보장하지 않습니다.
+
+`.env`에 `EMAIL_VERIFICATION_SECRET`(JWT 키와 별개의 임의 값, 최소 32바이트), `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`을 설정합니다. 예시 파일은 SMTP 587/STARTTLS 기준입니다. 비밀키 누락 시 회원가입 트랜잭션은 실패하며 저장되지 않습니다. SMTP 설정 누락/발송 실패 시에는 가입 정보가 유지되고 서버에 원문 없는 오류 로그가 남습니다.
+
+사용자와 코드 HMAC은 같은 트랜잭션에 저장하며 메일은 커밋 후 발송합니다. 현재 발송은 요청 스레드에서 수행되며 SMTP 타임아웃은 각각 5초입니다. 발송 실패 시 사용자가 재발송해야 합니다. 메모리 이벤트이므로 커밋 직후 서버가 종료되면 메일이 유실될 수 있으며, 자동 재시도/전달 보장이 필요하면 영속 발송 큐를 추가해야 합니다. 인증 코드는 로그와 API 응답에 포함하지 않습니다.
+
+기존 DB에는 `database/email-verifications.sql`의 테이블을 먼저 적용해야 합니다. 이 스크립트는 자동 실행되지 않습니다. 테스트에서는 H2가 테이블을 생성합니다.
+
+이메일 인증 코드는 다음 계층으로 구분합니다.
+
+- `auth/application/verification`: 인증 서비스, 코드 생성/HMAC, 메일 발송 인터페이스와 발송 요청 이벤트
+- `auth/domain`: `EmailVerificationToken`과 저장소 계약 `EmailVerificationRepository`
+- `auth/domain/exception`: 인증 실패 예외
+- `auth/infrastructure/persistence`: 엔티티, `EmailVerificationMapper`, `EmailVerificationJpaRepository`, `EmailVerificationRepositoryImpl`
+- `auth/infrastructure/mail`: SMTP 발송 구현과 커밋 후 발송 리스너
+- `auth/presentation`: HTTP 컨트롤러와 IP 요청 제한
+
+저장소 구현은 서비스 트랜잭션을 필수로 요구합니다. JPA 저장소의 쓰기 잠금은 서비스가 끝날 때까지 유지되며, Mapper가 변환을 담당합니다. `save`는 신규 INSERT, `update`는 기존 행 갱신입니다. 엔티티는 `AssignedIdEntity`를 사용하고 기존 `user_id` 기본키 컬럼을 유지합니다.
 
 ### Swagger에서 인증된 요청 실행
 
