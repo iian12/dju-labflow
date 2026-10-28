@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import java.security.SecureRandom;
 import java.util.Base64;
 
+/** 구분 가능한 접두사와 256비트 비밀 난수를 결합해 프로젝트 API 키를 생성한다. */
 @Component
 public class ProjectApiKeyGenerator {
 

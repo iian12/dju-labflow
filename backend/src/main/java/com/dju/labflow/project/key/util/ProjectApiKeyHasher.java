@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
+/** API 키 원문을 SHA-256 16진수 해시로 바꿔 원문 저장 없이 인증한다. */
 @Component
 public class ProjectApiKeyHasher {
 
