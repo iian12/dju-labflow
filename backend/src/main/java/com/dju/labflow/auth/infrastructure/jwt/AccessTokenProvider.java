@@ -24,9 +24,9 @@ public class AccessTokenProvider {
 
     private final Clock clock;
 
-    public AccessTokenProvider(JwtProperties properties, Clock clock) {
-        this.key = Keys.hmacShaKeyFor(properties.secretKey().getBytes(StandardCharsets.UTF_8));
-        this.accessTokenExpirationMillis = properties.accessTokenExpiration().toMillis();
+    public AccessTokenProvider(JwtProperties jwtProperties, Clock clock) {
+        this.key = Keys.hmacShaKeyFor(jwtProperties.secretKey().getBytes(StandardCharsets.UTF_8));
+        this.accessTokenExpirationMillis = jwtProperties.accessTokenExpiration().toMillis();
         this.clock = clock;
     }
 

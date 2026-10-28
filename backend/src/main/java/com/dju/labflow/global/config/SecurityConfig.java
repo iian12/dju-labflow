@@ -34,19 +34,19 @@ public class SecurityConfig {
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
     private final ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter;
-    private final AuthCookieProperties cookieProperties;
+    private final AuthCookieProperties authCookieProperties;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             CustomAuthenticationEntryPoint authenticationEntryPoint,
             CustomAccessDeniedHandler customAccessDeniedHandler,
             ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
-            AuthCookieProperties cookieProperties) {
+            AuthCookieProperties authCookieProperties) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.customAccessDeniedHandler = customAccessDeniedHandler;
         this.projectApiKeyAuthenticationFilter = projectApiKeyAuthenticationFilter;
-        this.cookieProperties = cookieProperties;
+        this.authCookieProperties = authCookieProperties;
     }
 
     @Bean
@@ -63,8 +63,8 @@ public class SecurityConfig {
         csrfTokenRepository.setCookiePath("/");
         csrfTokenRepository.setCookieCustomizer(
                 cookie ->
-                        cookie.secure(cookieProperties.secure())
-                                .sameSite(cookieProperties.sameSite()));
+                        cookie.secure(authCookieProperties.secure())
+                                .sameSite(authCookieProperties.sameSite()));
 
         http.cors(Customizer.withDefaults())
                 .csrf(

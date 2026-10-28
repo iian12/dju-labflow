@@ -20,17 +20,17 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/auth")
 @Tag(name = "회원가입 및 이메일 인증")
 public class EmailVerificationController {
-    private final AuthService auth;
-    private final EmailVerificationService verification;
-    private final VerificationRequestLimiter limiter;
+    private final AuthService authService;
+    private final EmailVerificationService emailVerificationService;
+    private final VerificationRequestLimiter verificationRequestLimiter;
 
     public EmailVerificationController(
-            AuthService auth,
-            EmailVerificationService verification,
-            VerificationRequestLimiter limiter) {
-        this.auth = auth;
-        this.verification = verification;
-        this.limiter = limiter;
+            AuthService authService,
+            EmailVerificationService emailVerificationService,
+            VerificationRequestLimiter verificationRequestLimiter) {
+        this.authService = authService;
+        this.emailVerificationService = emailVerificationService;
+        this.verificationRequestLimiter = verificationRequestLimiter;
     }
 
     @PostMapping("/sign-up")
@@ -40,8 +40,8 @@ public class EmailVerificationController {
             summary = "회원가입 및 인증 코드 발송",
             description = "미인증 계정을 생성합니다. 메일 미수신 시 60초 후 재발송할 수 있습니다.")
     public void signUp(@Valid @RequestBody SignUpRequest body, HttpServletRequest request) {
-        limiter.check(request.getRemoteAddr(), false);
-        auth.signUp(
+        verificationRequestLimiter.check(request.getRemoteAddr(), false);
+        authService.signUp(
                 new SignUpCommand(
                         body.email(), body.password(), body.confirmPassword(), body.name()));
     }
@@ -53,8 +53,8 @@ public class EmailVerificationController {
             summary = "인증 코드 확인",
             description = "코드는 10분간 유효하며 최대 5회 검증 실패 후 사용할 수 없습니다. CSRF 쿠키와 헤더가 필요합니다.")
     public void verify(@Valid @RequestBody VerifyRequest body, HttpServletRequest request) {
-        limiter.check(request.getRemoteAddr(), true);
-        verification.verify(body.email(), body.code());
+        verificationRequestLimiter.check(request.getRemoteAddr(), true);
+        emailVerificationService.verify(body.email(), body.code());
     }
 
     @PostMapping("/email-verifications/resend")
@@ -64,8 +64,8 @@ public class EmailVerificationController {
             summary = "인증 코드 재발송 요청",
             description = "60초 간격, 계정당 시간당 5회. 계정 존재/상태 및 제한 여부와 무관하게 202를 반환합니다. CSRF가 필요합니다.")
     public void resend(@Valid @RequestBody ResendRequest body, HttpServletRequest request) {
-        limiter.check(request.getRemoteAddr(), false);
-        verification.resend(body.email());
+        verificationRequestLimiter.check(request.getRemoteAddr(), false);
+        emailVerificationService.resend(body.email());
     }
 
     public record SignUpRequest(

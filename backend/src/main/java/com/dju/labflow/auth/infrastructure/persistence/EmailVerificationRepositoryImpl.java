@@ -12,28 +12,31 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 @Transactional(propagation = Propagation.MANDATORY)
 public class EmailVerificationRepositoryImpl implements EmailVerificationRepository {
-    private final EmailVerificationJpaRepository jpaRepository;
+    private final EmailVerificationJpaRepository emailVerificationJpaRepository;
 
-    public EmailVerificationRepositoryImpl(EmailVerificationJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
+    public EmailVerificationRepositoryImpl(
+            EmailVerificationJpaRepository emailVerificationJpaRepository) {
+        this.emailVerificationJpaRepository = emailVerificationJpaRepository;
     }
 
     @Override
     public void save(EmailVerification token) {
-        jpaRepository.save(EmailVerificationMapper.toEntity(token));
+        emailVerificationJpaRepository.save(EmailVerificationMapper.toEntity(token));
     }
 
     @Override
     public Optional<EmailVerification> findForUpdate(Long userId) {
         Objects.requireNonNull(userId, "User ID must not be null");
-        return jpaRepository.findByUserIdForUpdate(userId).map(EmailVerificationMapper::toDomain);
+        return emailVerificationJpaRepository
+                .findByUserIdForUpdate(userId)
+                .map(EmailVerificationMapper::toDomain);
     }
 
     @Override
     public void update(EmailVerification token) {
         Objects.requireNonNull(token, "Email verification token must not be null");
         EmailVerificationEntity entity =
-                jpaRepository
+                emailVerificationJpaRepository
                         .findByUserIdForUpdate(token.getUserId())
                         .orElseThrow(
                                 () ->

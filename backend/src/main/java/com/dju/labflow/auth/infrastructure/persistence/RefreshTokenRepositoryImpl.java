@@ -15,10 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
 
-    private final RefreshTokenJpaRepository jpaRepository;
+    private final RefreshTokenJpaRepository refreshTokenJpaRepository;
 
-    public RefreshTokenRepositoryImpl(RefreshTokenJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
+    public RefreshTokenRepositoryImpl(RefreshTokenJpaRepository refreshTokenJpaRepository) {
+        this.refreshTokenJpaRepository = refreshTokenJpaRepository;
     }
 
     @Override
@@ -27,7 +27,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
         Objects.requireNonNull(refreshToken, "Refresh Token must not be null");
 
         RefreshTokenEntity savedEntity =
-                jpaRepository.save(RefreshTokenMapper.toEntity(refreshToken));
+                refreshTokenJpaRepository.save(RefreshTokenMapper.toEntity(refreshToken));
 
         return RefreshTokenMapper.toDomain(savedEntity);
     }
@@ -36,7 +36,9 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     public Optional<RefreshToken> findByTokenHash(String tokenHash) {
         if (tokenHash == null || tokenHash.isBlank()) return Optional.empty();
 
-        return jpaRepository.findByTokenHash(tokenHash).map(RefreshTokenMapper::toDomain);
+        return refreshTokenJpaRepository
+                .findByTokenHash(tokenHash)
+                .map(RefreshTokenMapper::toDomain);
     }
 
     @Override
@@ -45,14 +47,16 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
             return Optional.empty();
         }
 
-        return jpaRepository.findByTokenHashForUpdate(tokenHash).map(RefreshTokenMapper::toDomain);
+        return refreshTokenJpaRepository
+                .findByTokenHashForUpdate(tokenHash)
+                .map(RefreshTokenMapper::toDomain);
     }
 
     @Override
     @Transactional
     public void revoke(RefreshTokenId refreshTokenId, Instant revokedAt) {
         RefreshTokenEntity entity =
-                jpaRepository
+                refreshTokenJpaRepository
                         .findById(refreshTokenId.value())
                         .orElseThrow(RefreshTokenNotFoundException::new);
 
@@ -66,7 +70,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     @Override
     @Transactional
     public void delete(RefreshTokenId refreshTokenId) {
-        jpaRepository.deleteById(refreshTokenId.value());
+        refreshTokenJpaRepository.deleteById(refreshTokenId.value());
     }
 
     @Override
@@ -74,7 +78,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     public void deleteAllByUserId(UserId userId) {
         Objects.requireNonNull(userId, "User Id must not be null");
 
-        jpaRepository.deleteAllByUserId(userId.value());
+        refreshTokenJpaRepository.deleteAllByUserId(userId.value());
     }
 
     @Override
@@ -82,6 +86,6 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     public void deleteExpiredTokens(Instant now) {
         Objects.requireNonNull(now);
 
-        jpaRepository.deleteByExpiresAtLessThanEqual(now);
+        refreshTokenJpaRepository.deleteByExpiresAtLessThanEqual(now);
     }
 }

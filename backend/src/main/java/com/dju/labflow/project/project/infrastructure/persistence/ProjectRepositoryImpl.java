@@ -13,10 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class ProjectRepositoryImpl implements ProjectRepository {
 
-    private final ProjectJpaRepository jpaRepository;
+    private final ProjectJpaRepository projectJpaRepository;
 
-    public ProjectRepositoryImpl(ProjectJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
+    public ProjectRepositoryImpl(ProjectJpaRepository projectJpaRepository) {
+        this.projectJpaRepository = projectJpaRepository;
     }
 
     @Override
@@ -24,7 +24,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public Project save(Project project) {
         Objects.requireNonNull(project, "Project must not be null");
 
-        ProjectEntity savedEntity = jpaRepository.save(ProjectMapper.toEntity(project));
+        ProjectEntity savedEntity = projectJpaRepository.save(ProjectMapper.toEntity(project));
         return ProjectMapper.toDomain(savedEntity);
     }
 
@@ -32,7 +32,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     @Transactional
     public void update(Project project) {
         ProjectEntity entity =
-                jpaRepository
+                projectJpaRepository
                         .findById(project.getId().value())
                         .orElseThrow(ProjectNotFoundException::new);
         entity.update(
@@ -46,6 +46,6 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public Optional<Project> findById(ProjectId id) {
         if (id == null) return Optional.empty();
 
-        return jpaRepository.findById(id.value()).map(ProjectMapper::toDomain);
+        return projectJpaRepository.findById(id.value()).map(ProjectMapper::toDomain);
     }
 }

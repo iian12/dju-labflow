@@ -11,16 +11,16 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Component
 public class VerificationMailListener {
     private static final Logger log = LoggerFactory.getLogger(VerificationMailListener.class);
-    private final VerificationEmailSender sender;
+    private final VerificationEmailSender verificationEmailSender;
 
-    public VerificationMailListener(VerificationEmailSender sender) {
-        this.sender = sender;
+    public VerificationMailListener(VerificationEmailSender verificationEmailSender) {
+        this.verificationEmailSender = verificationEmailSender;
     }
 
     @TransactionalEventListener
     public void send(VerificationMailRequested event) {
         try {
-            sender.send(event.email(), event.code());
+            verificationEmailSender.send(event.email(), event.code());
         } catch (RuntimeException exception) {
             // SMTP 예외에는 수신자나 본문이 포함될 수 있으므로 예외 원문을 남기지 않는다.
             log.error(

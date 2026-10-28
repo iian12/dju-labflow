@@ -15,55 +15,61 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class EmailVerificationService {
-    private final EmailVerificationRepository tokens;
-    private final UserRepository users;
-    private final EmailVerificationCodeGenerator generator;
-    private final VerificationCodeHasher hasher;
+    private final EmailVerificationRepository emailVerificationRepository;
+    private final UserRepository userRepository;
+    private final EmailVerificationCodeGenerator emailVerificationCodeGenerator;
+    private final VerificationCodeHasher verificationCodeHasher;
     private final Clock clock;
-    private final ApplicationEventPublisher events;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public EmailVerificationService(
-            EmailVerificationRepository tokens,
-            UserRepository users,
-            EmailVerificationCodeGenerator generator,
-            VerificationCodeHasher hasher,
+            EmailVerificationRepository emailVerificationRepository,
+            UserRepository userRepository,
+            EmailVerificationCodeGenerator emailVerificationCodeGenerator,
+            VerificationCodeHasher verificationCodeHasher,
             Clock clock,
-            ApplicationEventPublisher events) {
-        this.tokens = tokens;
-        this.users = users;
-        this.generator = generator;
-        this.hasher = hasher;
+            ApplicationEventPublisher applicationEventPublisher) {
+        this.emailVerificationRepository = emailVerificationRepository;
+        this.userRepository = userRepository;
+        this.emailVerificationCodeGenerator = emailVerificationCodeGenerator;
+        this.verificationCodeHasher = verificationCodeHasher;
         this.clock = clock;
-        this.events = events;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     public void issue(User user) {
-        String code = generator.generate();
-        tokens.save(
+        String code = emailVerificationCodeGenerator.generate();
+        emailVerificationRepository.save(
                 EmailVerification.issue(
                         user.getId().value(),
-                        hasher.hash(user.getId().value(), code),
+                        verificationCodeHasher.hash(user.getId().value(), code),
                         clock.instant()));
-        events.publishEvent(new VerificationMailRequested(user.getEmail(), code));
+        applicationEventPublisher.publishEvent(
+                new VerificationMailRequested(user.getEmail(), code));
     }
 
     /** 미가입/이미 인증/제한 초과 여부를 응답으로 노출하지 않는다. */
     public void resend(String email) {
-        User user = users.findByEmail(email).orElse(null);
+        User user = userRepository.findByEmail(email).orElse(null);
         if (user == null || user.getAccountStatus() != AccountStatus.PENDING_VERIFICATION) return;
-        EmailVerification token = tokens.findForUpdate(user.getId().value()).orElse(null);
+        EmailVerification token =
+                emailVerificationRepository.findForUpdate(user.getId().value()).orElse(null);
         if (token == null || !token.canResend(clock.instant())) return;
-        String code = generator.generate();
-        token.resend(hasher.hash(user.getId().value(), code), clock.instant());
-        tokens.update(token);
-        events.publishEvent(new VerificationMailRequested(email, code));
+        String code = emailVerificationCodeGenerator.generate();
+        token.resend(verificationCodeHasher.hash(user.getId().value(), code), clock.instant());
+        emailVerificationRepository.update(token);
+        applicationEventPublisher.publishEvent(new VerificationMailRequested(email, code));
     }
 
     @Transactional(noRollbackFor = InvalidVerificationCodeException.class)
     public void verify(String email, String input) {
-        User user = users.findByEmail(email).orElseThrow(InvalidVerificationCodeException::new);
+        User user =
+                userRepository
+                        .findByEmail(email)
+                        .orElseThrow(InvalidVerificationCodeException::new);
         EmailVerification token =
-                tokens.findForUpdate(user.getId().value())
+                emailVerificationRepository
+                        .findForUpdate(user.getId().value())
                         .orElseThrow(InvalidVerificationCodeException::new);
         if (user.getAccountStatus() != AccountStatus.PENDING_VERIFICATION
                 || !token.usable(clock.instant())) {
@@ -71,20 +77,20 @@ public class EmailVerificationService {
         }
         String code;
         try {
-            code = generator.normalize(input);
+            code = emailVerificationCodeGenerator.normalize(input);
         } catch (IllegalArgumentException exception) {
             token.fail();
-            tokens.update(token);
+            emailVerificationRepository.update(token);
             throw new InvalidVerificationCodeException();
         }
-        if (!hasher.matches(user.getId().value(), code, token.getCodeHash())) {
+        if (!verificationCodeHasher.matches(user.getId().value(), code, token.getCodeHash())) {
             token.fail();
-            tokens.update(token);
+            emailVerificationRepository.update(token);
             throw new InvalidVerificationCodeException();
         }
         user.activate();
-        users.update(user);
+        userRepository.update(user);
         token.consume();
-        tokens.update(token);
+        emailVerificationRepository.update(token);
     }
 }

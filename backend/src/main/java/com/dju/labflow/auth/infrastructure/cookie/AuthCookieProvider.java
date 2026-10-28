@@ -21,11 +21,11 @@ public class AuthCookieProvider {
     private final String sameSite;
 
     public AuthCookieProvider(
-            JwtProperties properties, AuthCookieProperties cookieProperties, Clock clock) {
+            JwtProperties jwtProperties, AuthCookieProperties authCookieProperties, Clock clock) {
         this.clock = clock;
-        this.accessTokenExpiration = properties.accessTokenExpiration();
-        this.secure = cookieProperties.secure();
-        this.sameSite = cookieProperties.sameSite();
+        this.accessTokenExpiration = jwtProperties.accessTokenExpiration();
+        this.secure = authCookieProperties.secure();
+        this.sameSite = authCookieProperties.sameSite();
     }
 
     public ResponseCookie createAccessTokenCookie(String accessToken) {

@@ -19,9 +19,10 @@ public class RefreshTokenGenerator {
 
     private final Clock clock;
 
-    public RefreshTokenGenerator(SecureRandom secureRandom, JwtProperties properties, Clock clock) {
+    public RefreshTokenGenerator(
+            SecureRandom secureRandom, JwtProperties jwtProperties, Clock clock) {
         this.secureRandom = secureRandom;
-        this.refreshTokenExpirationMillis = properties.refreshTokenExpiration().toMillis();
+        this.refreshTokenExpirationMillis = jwtProperties.refreshTokenExpiration().toMillis();
         this.clock = clock;
     }
 

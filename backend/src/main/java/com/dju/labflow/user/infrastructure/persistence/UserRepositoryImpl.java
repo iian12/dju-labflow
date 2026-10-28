@@ -13,10 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class UserRepositoryImpl implements UserRepository {
 
-    private final UserJpaRepository jpaRepository;
+    private final UserJpaRepository userJpaRepository;
 
-    public UserRepositoryImpl(UserJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
+    public UserRepositoryImpl(UserJpaRepository userJpaRepository) {
+        this.userJpaRepository = userJpaRepository;
     }
 
     @Override
@@ -24,7 +24,7 @@ public class UserRepositoryImpl implements UserRepository {
     public User save(User user) {
         Objects.requireNonNull(user, "User must not be null");
 
-        UserEntity savedEntity = jpaRepository.save(UserMapper.toEntity(user));
+        UserEntity savedEntity = userJpaRepository.save(UserMapper.toEntity(user));
 
         return UserMapper.toDomain(savedEntity);
     }
@@ -33,7 +33,7 @@ public class UserRepositoryImpl implements UserRepository {
     @Transactional
     public void update(User user) {
         UserEntity entity =
-                jpaRepository
+                userJpaRepository
                         .findById(user.getId().value())
                         .orElseThrow(UserNotFoundException::new);
 
@@ -46,20 +46,20 @@ public class UserRepositoryImpl implements UserRepository {
     public Optional<User> findById(UserId userId) {
         if (userId == null) return Optional.empty();
 
-        return jpaRepository.findById(userId.value()).map(UserMapper::toDomain);
+        return userJpaRepository.findById(userId.value()).map(UserMapper::toDomain);
     }
 
     @Override
     public Optional<User> findByEmail(String email) {
         Objects.requireNonNull(email, "Email must not be null");
 
-        return jpaRepository.findByEmail(email).map(UserMapper::toDomain);
+        return userJpaRepository.findByEmail(email).map(UserMapper::toDomain);
     }
 
     @Override
     public boolean existsByEmail(String email) {
         Objects.requireNonNull(email, "Email must not be null");
 
-        return jpaRepository.existsByEmail(email);
+        return userJpaRepository.existsByEmail(email);
     }
 }

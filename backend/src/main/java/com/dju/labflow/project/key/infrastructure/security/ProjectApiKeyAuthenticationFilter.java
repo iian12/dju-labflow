@@ -22,14 +22,14 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String PREFIX = "Bearer ";
 
-    private final ProjectApiKeyAuthenticationService authenticationService;
+    private final ProjectApiKeyAuthenticationService projectApiKeyAuthenticationService;
 
     private final AuthenticationEntryPoint authenticationEntryPoint;
 
     public ProjectApiKeyAuthenticationFilter(
-            ProjectApiKeyAuthenticationService authenticationService,
+            ProjectApiKeyAuthenticationService projectApiKeyAuthenticationService,
             AuthenticationEntryPoint authenticationEntryPoint) {
-        this.authenticationService = authenticationService;
+        this.projectApiKeyAuthenticationService = projectApiKeyAuthenticationService;
         this.authenticationEntryPoint = authenticationEntryPoint;
     }
 
@@ -56,7 +56,8 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 return;
             }
 
-            ProjectApiKeyPrincipal principal = authenticationService.authenticate(rawApiKey);
+            ProjectApiKeyPrincipal principal =
+                    projectApiKeyAuthenticationService.authenticate(rawApiKey);
 
             ProjectApiKeyAuthenticationToken authentication =
                     new ProjectApiKeyAuthenticationToken(principal);

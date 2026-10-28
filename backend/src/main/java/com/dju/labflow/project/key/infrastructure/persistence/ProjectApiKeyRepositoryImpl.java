@@ -12,10 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
 
-    private final ProjectApiKeyJpaRepository jpaRepository;
+    private final ProjectApiKeyJpaRepository projectApiKeyJpaRepository;
 
-    public ProjectApiKeyRepositoryImpl(ProjectApiKeyJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
+    public ProjectApiKeyRepositoryImpl(ProjectApiKeyJpaRepository projectApiKeyJpaRepository) {
+        this.projectApiKeyJpaRepository = projectApiKeyJpaRepository;
     }
 
     @Override
@@ -24,7 +24,7 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
         Objects.requireNonNull(projectApiKey, "ProjectApiKey must not be null");
 
         ProjectApiKeyEntity savedEntity =
-                jpaRepository.save(ProjectApiKeyMapper.toEntity(projectApiKey));
+                projectApiKeyJpaRepository.save(ProjectApiKeyMapper.toEntity(projectApiKey));
 
         return ProjectApiKeyMapper.toDomain(savedEntity);
     }
@@ -34,7 +34,7 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
     public void update(ProjectApiKey projectApiKey) {
         Objects.requireNonNull(projectApiKey, "ProjectApiKey must not be null");
         ProjectApiKeyEntity entity =
-                jpaRepository
+                projectApiKeyJpaRepository
                         .findById(projectApiKey.getId().value())
                         .orElseThrow(ProjectApiKeyNotFoundException::new);
         entity.update(
@@ -48,6 +48,6 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
     public Optional<ProjectApiKey> findByKeyHash(String keyHash) {
         Objects.requireNonNull(keyHash, "Key hash must not be null");
 
-        return jpaRepository.findByKeyHash(keyHash).map(ProjectApiKeyMapper::toDomain);
+        return projectApiKeyJpaRepository.findByKeyHash(keyHash).map(ProjectApiKeyMapper::toDomain);
     }
 }
