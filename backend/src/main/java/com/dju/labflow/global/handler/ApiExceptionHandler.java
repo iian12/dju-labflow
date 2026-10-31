@@ -4,12 +4,15 @@ import com.dju.labflow.auth.domain.exception.RefreshTokenException;
 import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
+import com.dju.labflow.run.run.exception.RunNotFoundException;
+import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import com.dju.labflow.user.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -116,6 +119,18 @@ public class ApiExceptionHandler {
         return error(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found");
     }
 
+    @ExceptionHandler(RunNotFoundException.class)
+    public ResponseEntity<SecurityErrorResponse> runNotFound(RunNotFoundException exception) {
+        return error(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "Run not found");
+    }
+
+    @ExceptionHandler(RunStateConflictException.class)
+    public ResponseEntity<SecurityErrorResponse> runStateConflict(
+            RunStateConflictException exception) {
+        return error(
+                HttpStatus.CONFLICT, "RUN_STATE_CONFLICT", "Request conflicts with the run state");
+    }
+
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<SecurityErrorResponse> userNotFound(UserNotFoundException exception) {
         return error(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found");
@@ -137,6 +152,12 @@ public class ApiExceptionHandler {
             DataIntegrityViolationException exception) {
         // 사전 중복 검사 이후 동시에 INSERT된 경우도 500 대신 409로 처리한다.
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Request conflicts with existing data");
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<SecurityErrorResponse> staleState(
+            OptimisticLockingFailureException exception) {
+        return error(HttpStatus.CONFLICT, "STALE_STATE", "Resource changed; reload and retry");
     }
 
     @ExceptionHandler({AuthenticationException.class, RefreshTokenException.class})

@@ -1,0 +1,157 @@
+
+# ==========================================
+# Labflow - Root .gitignore
+# ==========================================
+
+# ------------------------------------------
+# OS
+# ------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# ------------------------------------------
+# IDE / Editor
+# ------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ------------------------------------------
+# Environment / Secrets
+# ------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+secrets/
+
+# ------------------------------------------
+# Logs / Temporary Files
+# ------------------------------------------
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.pid
+
+# ------------------------------------------
+# Backend - Java / Spring Boot / Gradle
+# ------------------------------------------
+backend/.gradle/
+backend/build/
+backend/out/
+backend/target/
+
+backend/bin/
+backend/.classpath
+backend/.project
+backend/.settings/
+
+*.class
+*.hprof
+hs_err_pid*
+
+# Keep Gradle wrapper
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# ------------------------------------------
+# Frontend - React / Vite / Node.js
+# ------------------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/coverage/
+
+frontend/.vite/
+frontend/.cache/
+frontend/.next/
+
+frontend/*.tsbuildinfo
+frontend/.eslintcache
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------
+# SDK - Python
+# ------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+ENV/
+
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.prof
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ------------------------------------------
+# Test / Runtime Artifacts
+# ------------------------------------------
+test-results/
+artifacts/
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+
+# ------------------------------------------
+# Local Database / Storage
+# ------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+uploads/
+storage/
+data/local/
+
+# ------------------------------------------
+# Docker / Local Overrides
+# ------------------------------------------
+docker-compose.override.yml
+compose.override.yml
+
+# Local frontend design prototype
+/frontend-design/

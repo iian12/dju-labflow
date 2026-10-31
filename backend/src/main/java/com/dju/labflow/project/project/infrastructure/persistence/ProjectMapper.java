@@ -29,6 +29,7 @@ public class ProjectMapper {
                 UserId.of(entity.getCreatedBy()),
                 entity.getVisibility(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt());
+                entity.getUpdatedAt(),
+                entity.getVersion());
     }
 }

@@ -6,6 +6,7 @@ import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,10 +32,16 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     @Override
     @Transactional
     public void update(Project project) {
+        Objects.requireNonNull(project, "Project must not be null");
         ProjectEntity entity =
                 projectJpaRepository
                         .findById(project.getId().value())
                         .orElseThrow(ProjectNotFoundException::new);
+        // JPA가 읽은 최신 버전뿐 아니라 도메인 객체를 처음 조회한 버전도 검사한다.
+        if (project.getVersion() == null || !project.getVersion().equals(entity.getVersion())) {
+            throw new ObjectOptimisticLockingFailureException(
+                    ProjectEntity.class, project.getId().value());
+        }
         entity.update(
                 project.getName(),
                 project.getDescription(),

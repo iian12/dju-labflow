@@ -16,15 +16,17 @@ public class Project {
     private ProjectVisibility visibility;
     private final Instant createdAt;
     private Instant updatedAt;
+    private final Long version;
 
-    public Project(
+    private Project(
             ProjectId id,
             String name,
             String description,
             UserId createdBy,
             ProjectVisibility visibility,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            Long version) {
         this.id = InputValidation.required(id, "Project ID");
         this.name = InputValidation.text(name, "Project name", 100);
         this.description = InputValidation.optionalText(description, "Description", 2000);
@@ -32,6 +34,7 @@ public class Project {
         this.visibility = InputValidation.required(visibility, "Visibility");
         this.createdAt = InputValidation.required(createdAt, "Creation time");
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static Project create(
@@ -41,7 +44,7 @@ public class Project {
             UserId createdBy,
             ProjectVisibility visibility,
             Instant createdAt) {
-        return new Project(id, name, description, createdBy, visibility, createdAt, null);
+        return new Project(id, name, description, createdBy, visibility, createdAt, null, null);
     }
 
     public static Project restore(
@@ -51,8 +54,17 @@ public class Project {
             UserId createdBy,
             ProjectVisibility visibility,
             Instant createdAt,
-            Instant updatedAt) {
-        return new Project(id, name, description, createdBy, visibility, createdAt, updatedAt);
+            Instant updatedAt,
+            Long version) {
+        return new Project(
+                id,
+                name,
+                description,
+                createdBy,
+                visibility,
+                createdAt,
+                updatedAt,
+                InputValidation.required(version, "Project version"));
     }
 
     /** 생성자/소유자/생성 시각은 유지하고 편집 가능한 정보만 변경한다. */
