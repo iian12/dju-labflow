@@ -5,11 +5,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.dju.labflow.auth.application.SignUpCommand;
 import com.dju.labflow.global.handler.ApiExceptionHandler;
+import com.dju.labflow.run.run.exception.RunNotFoundException;
+import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import jakarta.validation.Valid;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.*;
@@ -42,6 +45,39 @@ class ApiErrorContractTests {
     }
 
     @Test
+    void staleStateReturns409WithoutInternalDetails() throws Exception {
+        mvc.perform(post("/test-errors/stale"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STALE_STATE"))
+                .andExpect(
+                        content()
+                                .string(
+                                        org.hamcrest.Matchers.not(
+                                                org.hamcrest.Matchers.containsString(
+                                                        "private version details"))));
+    }
+
+    @Test
+    void missingRunReturns404() throws Exception {
+        mvc.perform(post("/test-errors/missing-run"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RUN_NOT_FOUND"));
+    }
+
+    @Test
+    void runStateConflictReturns409WithoutFailureDetails() throws Exception {
+        mvc.perform(post("/test-errors/run-state"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RUN_STATE_CONFLICT"))
+                .andExpect(
+                        content()
+                                .string(
+                                        org.hamcrest.Matchers.not(
+                                                org.hamcrest.Matchers.containsString(
+                                                        "private failure details"))));
+    }
+
+    @Test
     void nullPasswordIs400WithFieldErrorsInsteadOf500() throws Exception {
         mvc.perform(
                         post("/test-errors/signup")
@@ -69,5 +105,20 @@ class ApiErrorContractTests {
 
         @PostMapping("/signup")
         void signup(@Valid @RequestBody SignUpCommand command) {}
+
+        @PostMapping("/stale")
+        void stale() {
+            throw new OptimisticLockingFailureException("private version details");
+        }
+
+        @PostMapping("/missing-run")
+        void missingRun() {
+            throw new RunNotFoundException();
+        }
+
+        @PostMapping("/run-state")
+        void runState() {
+            throw new RunStateConflictException("private failure details");
+        }
     }
 }
