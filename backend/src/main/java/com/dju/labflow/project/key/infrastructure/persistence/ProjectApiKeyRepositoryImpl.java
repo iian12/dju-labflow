@@ -1,10 +1,14 @@
 package com.dju.labflow.project.key.infrastructure.persistence;
 
 import com.dju.labflow.project.key.domain.ProjectApiKey;
+import com.dju.labflow.project.key.domain.ProjectApiKeyId;
+import com.dju.labflow.project.key.domain.ProjectApiKeyStatus;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +41,11 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
                 projectApiKeyJpaRepository
                         .findById(projectApiKey.getId().value())
                         .orElseThrow(ProjectApiKeyNotFoundException::new);
+        if (projectApiKey.getVersion() == null
+                || !projectApiKey.getVersion().equals(entity.getVersion())) {
+            throw new ObjectOptimisticLockingFailureException(
+                    ProjectApiKeyEntity.class, projectApiKey.getId().value());
+        }
         entity.update(
                 projectApiKey.getName(),
                 projectApiKey.getStatus(),
@@ -49,5 +58,15 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
         Objects.requireNonNull(keyHash, "Key hash must not be null");
 
         return projectApiKeyJpaRepository.findByKeyHash(keyHash).map(ProjectApiKeyMapper::toDomain);
+    }
+
+    @Override
+    @Transactional
+    public boolean recordUsage(ProjectApiKeyId id, Instant usedAt) {
+        Objects.requireNonNull(id, "API key ID must not be null");
+        Objects.requireNonNull(usedAt, "Usage time must not be null");
+        return projectApiKeyJpaRepository.recordUsage(
+                        id.value(), usedAt, ProjectApiKeyStatus.ACTIVE)
+                == 1;
     }
 }

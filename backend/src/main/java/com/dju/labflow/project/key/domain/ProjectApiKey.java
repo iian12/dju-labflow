@@ -20,6 +20,7 @@ public class ProjectApiKey {
     private final Instant createdAt;
     private Instant revokedAt;
     private Instant lastUsedAt;
+    private final Long version;
 
     private ProjectApiKey(
             ProjectApiKeyId id,
@@ -31,7 +32,8 @@ public class ProjectApiKey {
             ProjectApiKeyStatus status,
             Instant createdAt,
             Instant revokedAt,
-            Instant lastUsedAt) {
+            Instant lastUsedAt,
+            Long version) {
         this.id = InputValidation.required(id, "API key ID");
         this.projectId = InputValidation.required(projectId, "Project ID");
         this.createdBy = InputValidation.required(createdBy, "Key owner");
@@ -42,6 +44,7 @@ public class ProjectApiKey {
         this.createdAt = InputValidation.required(createdAt, "Creation time");
         this.revokedAt = revokedAt;
         this.lastUsedAt = lastUsedAt;
+        this.version = version;
     }
 
     public static ProjectApiKey create(
@@ -65,7 +68,8 @@ public class ProjectApiKey {
                 status,
                 createdAt,
                 revokedAt,
-                lastUsedAt);
+                lastUsedAt,
+                null);
     }
 
     public static ProjectApiKey restore(
@@ -78,7 +82,8 @@ public class ProjectApiKey {
             ProjectApiKeyStatus status,
             Instant createdAt,
             Instant revokedAt,
-            Instant lastUsedAt) {
+            Instant lastUsedAt,
+            Long version) {
         return new ProjectApiKey(
                 id,
                 projectId,
@@ -89,7 +94,8 @@ public class ProjectApiKey {
                 status,
                 createdAt,
                 revokedAt,
-                lastUsedAt);
+                lastUsedAt,
+                InputValidation.required(version, "API key version"));
     }
 
     public void revoke(Instant revokedAt) {

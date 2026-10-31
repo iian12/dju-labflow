@@ -38,6 +38,7 @@ public class ProjectApiKeyMapper {
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 entity.getRevokedAt(),
-                entity.getLastUsedAt());
+                entity.getLastUsedAt(),
+                entity.getVersion());
     }
 }

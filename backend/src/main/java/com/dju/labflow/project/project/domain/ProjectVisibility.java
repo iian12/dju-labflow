@@ -1,8 +1,7 @@
 package com.dju.labflow.project.project.domain;
 
-/** 프로젝트 공개 범위의 도메인 값. 실제 리소스 조회 시 별도의 인가 검사가 필요하다. */
+/** 개인 프로젝트의 공개 범위. MVP는 PUBLIC/PRIVATE만 지원하며 팀 관리는 추후 구현한다. */
 public enum ProjectVisibility {
     PRIVATE,
-    TEAM,
     PUBLIC
 }

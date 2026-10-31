@@ -124,13 +124,42 @@ class AuthenticationPolicyTests {
                         null);
         when(keys.findByKeyHash(hasher.hash(raw))).thenReturn(Optional.of(key));
         when(users.findById(UserId.of(1L))).thenReturn(Optional.of(user(status)));
-        var service = new ProjectApiKeyAuthenticationService(keys, hasher, users);
+        when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(true);
+        var service = new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
         if (status == AccountStatus.ACTIVE) {
             assertThat(service.authenticate(raw).projectId()).isEqualTo(ProjectId.of(10L));
         } else {
             assertThatThrownBy(() -> service.authenticate(raw))
                     .isInstanceOf(InvalidProjectApiKeyException.class);
+            verify(keys, never()).recordUsage(any(), any());
         }
+    }
+
+    @Test
+    void sdkAuthenticationFailsIfKeyIsRevokedBeforeUsageIsRecorded() {
+        var keys = mock(ProjectApiKeyRepository.class);
+        var hasher = new ProjectApiKeyHasher();
+        String raw = "revoked-during-authentication";
+        ProjectApiKey key =
+                ProjectApiKey.create(
+                        ProjectApiKeyId.of(5L),
+                        ProjectId.of(10L),
+                        UserId.of(1L),
+                        "test key",
+                        "lfp_test",
+                        hasher.hash(raw),
+                        ProjectApiKeyStatus.ACTIVE,
+                        clock.instant(),
+                        null,
+                        null);
+        when(keys.findByKeyHash(hasher.hash(raw))).thenReturn(Optional.of(key));
+        when(users.findById(key.getCreatedBy()))
+                .thenReturn(Optional.of(user(AccountStatus.ACTIVE)));
+        when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(false);
+
+        var service = new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
+        assertThatThrownBy(() -> service.authenticate(raw))
+                .isInstanceOf(InvalidProjectApiKeyException.class);
     }
 
     private MockHttpServletRequest requestWithToken(String token) {

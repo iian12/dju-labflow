@@ -73,7 +73,7 @@ public class ProjectApiKeyService {
                         ProjectApiKeyStatus.ACTIVE,
                         now,
                         null,
-                        now);
+                        null);
 
         projectApiKeyRepository.save(apiKey);
 
