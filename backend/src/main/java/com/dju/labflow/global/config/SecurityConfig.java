@@ -118,6 +118,10 @@ public class SecurityConfig {
                                                 "/api/v1/auth/email-verifications/verify",
                                                 "/api/v1/auth/email-verifications/resend")
                                         .permitAll()
+                                        // 상세 공개 여부는 서비스가 검사한다. 개인 목록은 로그인 필수다.
+                                        .requestMatchers(
+                                                HttpMethod.GET, "/api/v1/projects/{projectId}")
+                                        .permitAll()
                                         .anyRequest()
                                         .authenticated())
                 .addFilterBefore(

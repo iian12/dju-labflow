@@ -1,6 +1,7 @@
 package com.dju.labflow.project.project.domain;
 
 import com.dju.labflow.global.validation.InputValidation;
+import com.dju.labflow.project.project.exception.ProjectVersionConflictException;
 import com.dju.labflow.user.domain.UserId;
 import java.time.Instant;
 import lombok.Getter;
@@ -65,6 +66,13 @@ public class Project {
                 createdAt,
                 updatedAt,
                 InputValidation.required(version, "Project version"));
+    }
+
+    /** HTTP 클라이언트의 오래된 수정/삭제 요청도 거부한다. */
+    public void requireVersion(Long expectedVersion) {
+        if (expectedVersion == null || expectedVersion < 0)
+            throw new IllegalArgumentException("Project version must not be null or negative");
+        if (!expectedVersion.equals(version)) throw new ProjectVersionConflictException();
     }
 
     /** 생성자/소유자/생성 시각은 유지하고 편집 가능한 정보만 변경한다. */

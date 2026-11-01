@@ -2,16 +2,22 @@ package com.dju.labflow.project.project.infrastructure.persistence;
 
 import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.ProjectId;
+import com.dju.labflow.project.project.domain.ProjectPage;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
+import com.dju.labflow.user.domain.UserId;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 프로젝트 도메인을 JPA에 연결하고 트랜잭션 안에서 기존 엔티티를 갱신한다. */
 @Repository
+@Transactional(readOnly = true)
 public class ProjectRepositoryImpl implements ProjectRepository {
 
     private final ProjectJpaRepository projectJpaRepository;
@@ -54,5 +60,41 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         if (id == null) return Optional.empty();
 
         return projectJpaRepository.findById(id.value()).map(ProjectMapper::toDomain);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Project> findByIdForUpdate(ProjectId id) {
+        Objects.requireNonNull(id, "Project ID must not be null");
+        return projectJpaRepository.findByIdForUpdate(id.value()).map(ProjectMapper::toDomain);
+    }
+
+    @Override
+    public ProjectPage findByCreatedBy(UserId ownerId, int page, int size) {
+        Objects.requireNonNull(ownerId, "Owner ID must not be null");
+        var result =
+                projectJpaRepository.findByCreatedBy(
+                        ownerId.value(),
+                        PageRequest.of(
+                                page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")));
+        return new ProjectPage(
+                result.getContent().stream().map(ProjectMapper::toDomain).toList(),
+                result.getNumber(),
+                result.getSize(),
+                result.getTotalElements());
+    }
+
+    @Override
+    @Transactional
+    public void delete(Project project) {
+        Objects.requireNonNull(project, "Project must not be null");
+        ProjectEntity entity =
+                projectJpaRepository
+                        .findById(project.getId().value())
+                        .orElseThrow(ProjectNotFoundException::new);
+        if (project.getVersion() == null || !project.getVersion().equals(entity.getVersion()))
+            throw new ObjectOptimisticLockingFailureException(
+                    ProjectEntity.class, project.getId().value());
+        projectJpaRepository.delete(entity);
     }
 }

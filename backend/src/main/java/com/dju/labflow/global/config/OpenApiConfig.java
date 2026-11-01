@@ -5,6 +5,8 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import java.util.List;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -19,7 +21,7 @@ public class OpenApiConfig {
                                 .title("LabFlow Backend API")
                                 .version("v1")
                                 .description(
-                                        "회원가입, 이메일 코드 인증, 프로젝트 키 발급과 SDK 실행 API를 제공합니다. 로그인/프로젝트 생성은 현재 서비스 계층만 구현되어 있습니다. "
+                                        "회원가입, 이메일 코드 인증, 로그인/토큰 갱신/로그아웃, 개인 프로젝트 관리와 SDK 실행 API를 제공합니다. "
                                                 + "ACTIVE 계정만 인증할 수 있으며 계정 차단 및 권한 변경은 다음 요청부터 반영됩니다. "
                                                 + "쿠키 인증 요청은 access_token 쿠키를 사용하고, 변경 요청에는 X-XSRF-TOKEN 헤더가 필요합니다. "
                                                 + "Swagger UI에서는 먼저 CSRF 조회 API를 실행하면 CSRF 쿠키를 읽어 헤더에 전달합니다. "
@@ -43,6 +45,14 @@ public class OpenApiConfig {
                                                 .description(
                                                         "XSRF-TOKEN 쿠키 값. 변경 요청의 CSRF 검증에 사용합니다."))
                                 .addSecuritySchemes(
+                                        "refreshTokenCookie",
+                                        new SecurityScheme()
+                                                .type(SecurityScheme.Type.APIKEY)
+                                                .in(SecurityScheme.In.COOKIE)
+                                                .name("refresh_token")
+                                                .description(
+                                                        "로그인 시 발급된 HttpOnly refresh 쿠키. /api/v1/auth 경로에서 브라우저가 자동 전송합니다."))
+                                .addSecuritySchemes(
                                         "projectApiKey",
                                         new SecurityScheme()
                                                 .type(SecurityScheme.Type.HTTP)
@@ -52,5 +62,21 @@ public class OpenApiConfig {
                 // 한 객체에 두 항목을 넣어 쿠키 인증 AND CSRF 조건을 표현한다.
                 .addSecurityItem(
                         new SecurityRequirement().addList("cookieAuth").addList("csrfToken"));
+    }
+
+    /** 여러 애너테이션의 OR 표현 대신 refresh 쿠키 AND CSRF 요구사항을 명시한다. */
+    @Bean
+    public OpenApiCustomizer refreshSecurityCustomizer() {
+        return openApi -> {
+            var path = openApi.getPaths().get("/api/v1/auth/refresh");
+            if (path != null && path.getPost() != null) {
+                path.getPost()
+                        .setSecurity(
+                                List.of(
+                                        new SecurityRequirement()
+                                                .addList("refreshTokenCookie")
+                                                .addList("csrfToken")));
+            }
+        };
     }
 }

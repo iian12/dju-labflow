@@ -4,6 +4,7 @@ import com.dju.labflow.auth.domain.exception.RefreshTokenException;
 import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
+import com.dju.labflow.project.project.exception.ProjectVersionConflictException;
 import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
@@ -20,6 +21,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -100,7 +102,8 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler({
         HttpMessageNotReadableException.class,
-        MethodArgumentTypeMismatchException.class
+        MethodArgumentTypeMismatchException.class,
+        MissingServletRequestParameterException.class
     })
     public ResponseEntity<SecurityErrorResponse> malformedRequest(Exception exception) {
         // 파서 예외에는 입력 원문이 들어갈 수 있으므로 그대로 반환하지 않는다.
@@ -154,9 +157,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Request conflicts with existing data");
     }
 
-    @ExceptionHandler(OptimisticLockingFailureException.class)
-    public ResponseEntity<SecurityErrorResponse> staleState(
-            OptimisticLockingFailureException exception) {
+    @ExceptionHandler({
+        OptimisticLockingFailureException.class,
+        ProjectVersionConflictException.class
+    })
+    public ResponseEntity<SecurityErrorResponse> staleState(RuntimeException exception) {
         return error(HttpStatus.CONFLICT, "STALE_STATE", "Resource changed; reload and retry");
     }
 

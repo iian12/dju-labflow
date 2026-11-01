@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 토큰 저장소의 JPA 어댑터. 도메인 객체와 관리 중인 엔티티를 구분해 갱신한다. */
@@ -42,6 +43,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public Optional<RefreshToken> findByTokenHashForUpdate(String tokenHash) {
         if (tokenHash == null || tokenHash.isBlank()) {
             return Optional.empty();

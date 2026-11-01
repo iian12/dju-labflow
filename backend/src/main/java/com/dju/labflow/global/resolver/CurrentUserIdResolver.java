@@ -4,6 +4,7 @@ import com.dju.labflow.auth.infrastructure.security.AppPrincipal;
 import com.dju.labflow.user.domain.UserId;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.MethodParameter;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -35,7 +36,10 @@ public class CurrentUserIdResolver implements HandlerMethodArgumentResolver {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
-        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+        if (auth == null
+                || !auth.isAuthenticated()
+                || auth instanceof AnonymousAuthenticationToken
+                || auth.getPrincipal() == null) {
             if (!required) return null;
             throw new AuthenticationCredentialsNotFoundException("Authentication required");
         }

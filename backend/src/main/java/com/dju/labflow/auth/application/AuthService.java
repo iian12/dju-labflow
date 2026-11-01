@@ -16,6 +16,7 @@ import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import com.dju.labflow.user.exception.DuplicateEmailException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -95,6 +96,10 @@ public class AuthService {
 
     @Transactional
     public LoginResult login(LoginCommand command) {
+        requestValidator.validate(command);
+        // 가입과 마찬가지로 BCrypt의 UTF-8 바이트 한도를 넘는 원문은 변형하지 않고 거부한다.
+        if (command.password().getBytes(StandardCharsets.UTF_8).length > 72)
+            throw new IllegalArgumentException("Password exceeds 72 UTF-8 bytes");
         Authentication authentication =
                 authenticationManager.authenticate(
                         new UsernamePasswordAuthenticationToken(

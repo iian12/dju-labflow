@@ -45,7 +45,7 @@ public class RunService {
         requestValidator.validate(command);
         var project =
                 projectRepository
-                        .findById(principal.projectId())
+                        .findByIdForUpdate(principal.projectId())
                         .orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(principal.createdBy()))
             throw new AccessDeniedException("Only project owners can create runs");

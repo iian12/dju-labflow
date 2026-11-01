@@ -53,7 +53,9 @@ public class ProjectApiKeyService {
             UserId requesterId, ProjectId projectId, IssueProjectApiKeyCommand command) {
         requestValidator.validate(command);
         Project project =
-                projectRepository.findById(projectId).orElseThrow(ProjectNotFoundException::new);
+                projectRepository
+                        .findByIdForUpdate(projectId)
+                        .orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(requesterId)) {
             throw new AccessDeniedException("Only the project owner can issue API keys");
         }

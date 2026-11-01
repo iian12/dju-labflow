@@ -39,7 +39,7 @@ Spotless와 Google Java Format의 AOSP 스타일(들여쓰기 4칸)을 사용합
 - 회원가입 비밀번호는 8자 이상, UTF-8 기준 72바이트 이하이며 공백 제거 등 원문 변형을 하지 않습니다.
 - 사용자 이름, 프로젝트 이름, API 키 이름은 공백만으로 구성할 수 없으며 최대 100자입니다. 이메일은 최대 254자, 프로젝트 설명은 최대 2,000자입니다.
 - 사용자 역할은 도메인 변경 후 `UserRepository.update()`로 저장합니다. 프로젝트는 `updateDetails(..., now)` 후 `ProjectRepository.update()`로 저장합니다.
-- MVP의 프로젝트는 개인 소유이며 공개 범위는 `PUBLIC`과 `PRIVATE`만 지원합니다. 팀 관리와 `TEAM` 공개 범위는 추후 구현합니다. 공개 범위별 조회 API와 인가 정책은 아직 구현되어 있지 않습니다.
+- MVP의 프로젝트는 개인 소유이며 공개 범위는 `PUBLIC`과 `PRIVATE`만 지원합니다. 팀 관리와 `TEAM` 공개 범위는 추후 구현합니다. `PUBLIC` 상세는 익명 조회가 가능하고 `PRIVATE`는 소유자만 조회할 수 있습니다. 개인 목록은 로그인한 사용자의 프로젝트만 반환합니다.
 - 기존 DB에 `TEAM` 프로젝트가 있다면 배포 전에 공개 범위를 `PRIVATE`으로 변경하고 DB enum/check 제약도 두 값에 맞춰 마이그레이션해야 합니다. 이 데이터 변경은 자동 실행하지 않습니다.
 
 ## Swagger / OpenAPI
@@ -56,9 +56,17 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | --- | --- | --- |
 | GET | `/api/v1/auth/csrf` | CSRF 쿠키 초기화. 로그인 불필요 |
 | POST | `/api/v1/auth/sign-up` | 미인증 회원 생성 및 코드 발송 요청 (201) |
+| POST | `/api/v1/auth/login` | 이메일/비밀번호 인증 후 HttpOnly 인증 쿠키 발급 (204) |
+| POST | `/api/v1/auth/refresh` | refresh 쿠키와 CSRF로 토큰 회전 (204) |
+| POST | `/api/v1/auth/logout` | 현재 refresh 토큰 폐기 및 인증 쿠키 삭제, CSRF 필요 (204) |
 | POST | `/api/v1/auth/email-verifications/verify` | 코드 검증 후 계정 활성화 (204) |
 | POST | `/api/v1/auth/email-verifications/resend` | 코드 재발송 요청 (202) |
 | POST | `/api/v1/project-api-keys/issue/{projectId}` | 프로젝트 소유자의 API 키 발급 |
+| POST | `/api/v1/projects` | 개인 프로젝트 생성 (201) |
+| GET | `/api/v1/projects?page=0&size=20` | 내 프로젝트 페이지 (200) |
+| GET | `/api/v1/projects/{projectId}` | 공개 범위를 적용한 프로젝트 상세 (200) |
+| PUT | `/api/v1/projects/{projectId}` | 소유자의 전체 정보 수정, 조회 version 필수 (204) |
+| DELETE | `/api/v1/projects/{projectId}?version=0` | 소유자의 프로젝트 및 종속 데이터 삭제 (204) |
 | POST | `/api/v1/sdk/runs` | 실행 생성. ID와 Location 반환 (201) |
 | GET | `/api/v1/sdk/runs/{runId}` | 실행 상태·메타데이터 조회 (200) |
 | PUT | `/api/v1/sdk/runs/{runId}/parameters` | 불변 파라미터 추가, 같은 키/값 재전송 허용 (204) |
@@ -69,7 +77,42 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | POST | `/api/v1/sdk/runs/{runId}/complete` | 실행 완료, 본문 없음 (204) |
 | POST | `/api/v1/sdk/runs/{runId}/fail` | 실패 사유와 함께 종료 (204) |
 
-로그인·토큰 갱신·프로젝트 생성은 서비스 계층만 구현되어 있으므로 아직 HTTP API로 호출할 수 없습니다.
+이메일 인증 후 로그인하여 프로젝트 생성·키 발급·SDK 실행까지 HTTP로 호출할 수 있습니다.
+
+### 로그인·토큰 갱신·로그아웃
+
+`POST /api/v1/auth/login`은 `{"email":"user@example.com","password":"your-password"}`를 받습니다. ACTIVE 계정만 성공하며 기존 정책에 따라 CSRF는 제외합니다. 실패한 이메일·비밀번호와 비활성 계정은 구분하지 않는 `401 UNAUTHORIZED`를 반환합니다. 이메일/필수값/길이 오류는 400이며 비밀번호 원문 공백은 보존하고 UTF-8 72바이트를 초과하면 거부합니다.
+
+로그인·갱신 성공은 본문 없는 204이며 토큰 원문은 JSON 대신 `Set-Cookie`로만 전달합니다. `access_token`은 Path `/`, `refresh_token`은 Path `/api/v1/auth`이고 모두 HttpOnly 및 설정된 Secure/SameSite를 적용합니다. `Cache-Control: no-store`를 사용하며 기존 CSRF 쿠키 발급 헤더도 보존합니다. 로그인 응답이나 `GET /api/v1/auth/csrf`에서 받은 XSRF-TOKEN 쿠키 원문을 이후 변경 요청의 X-XSRF-TOKEN 헤더에 보냅니다.
+
+프런트엔드가 다른 origin에서 호출할 때는 fetch의 `credentials: 'include'` 또는 axios의 `withCredentials: true`가 필요합니다. CORS 허용 출처는 기존 `CORS_ALLOWED_ORIGINS` 설정을 사용합니다.
+
+`POST /api/v1/auth/refresh`는 본문 없이 호출하며 유효한 refresh_token 쿠키와 CSRF가 필요합니다. access JWT가 없거나 만료되어도 갱신할 수 있습니다. refresh 토큰의 상태와 소유자의 현재 계정 상태를 확인하고, 기존 토큰 폐기와 새 토큰 저장을 한 트랜잭션에서 처리합니다. 같은 토큰의 동시 갱신은 한 요청만 성공하고 이전 토큰 재사용은 401입니다. refresh 누락/오류/만료/폐기/비활성 계정도 401이며, 실패한 요청은 새 쿠키나 삭제 쿠키를 발급하지 않습니다. 프런트엔드는 갱신 요청을 하나로 합쳐야 합니다. Swagger에는 refresh 쿠키 AND CSRF로 표시하며 access 쿠키는 요구하지 않습니다.
+
+`POST /api/v1/auth/logout`은 CSRF를 요구하고 현재 refresh 토큰만 폐기한 뒤 생성 시와 같은 Path/HttpOnly/Secure/SameSite로 인증 쿠키를 삭제합니다. refresh 토큰이 없거나 잘못되었거나 이미 만료/폐기되어도 204로 동작하며 다른 로그인 세션과 SDK 키는 유지합니다. CSRF가 없거나 틀리면 상태 변경 없이 403입니다. 로그아웃은 브라우저 쿠키 삭제와 refresh 재사용 차단이며, 이미 복사한 access JWT를 즉시 무효화하는 denylist/세션 저장소는 없습니다. 복사된 JWT는 기존 만료 시각(기본 15분)까지 유효할 수 있습니다. 같은 세션에서 갱신과 로그아웃을 동시에 보내지 않도록 클라이언트가 요청을 조정해야 합니다.
+
+```powershell
+$authUrl = 'http://localhost:8080/api/v1/auth'
+Invoke-RestMethod -Method Post -Uri "$authUrl/login" -ContentType 'application/json' -Body '{"email":"user@example.com","password":"your-password"}' -SessionVariable labflowSession
+Invoke-RestMethod -Method Get -Uri "$authUrl/csrf" -WebSession $labflowSession
+$csrfHeaders = @{ 'X-XSRF-TOKEN' = $labflowSession.Cookies.GetCookies([uri]$authUrl)['XSRF-TOKEN'].Value }
+Invoke-RestMethod -Method Post -Uri "$authUrl/refresh" -WebSession $labflowSession -Headers $csrfHeaders
+Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSession -Headers $csrfHeaders
+```
+
+`AuthHttpTests`는 이메일 발송만 대체하고 실제 비밀번호 인증·쿠키·CSRF·DB 트랜잭션으로 인증 흐름, 토큰 회전/재사용 거부, 로그아웃 멱등성, 동시 갱신, 새 토큰 저장 실패 시 롤백을 검사합니다. 회원가입→이메일 인증→로그인→프로젝트 생성→키 발급→SDK 실행도 HTTP로 연결해 검증합니다.
+
+### 개인 프로젝트 API
+
+프로젝트 생성·목록·수정·삭제에는 ACTIVE 사용자의 `access_token` 쿠키가 필요하며 변경 요청에는 CSRF 쿠키/헤더도 필요합니다. 생성 시 소유자는 인증 정보에서 결정합니다. SDK Bearer 키는 프로젝트 관리 권한을 주지 않습니다. 공개 상세 조회는 로그인 없이 가능하고 비공개 상세 조회는 비로그인 401, 다른 사용자 403입니다. 관리자도 다른 사용자의 비공개 프로젝트를 관리할 수 없습니다.
+
+생성 본문은 `{"name":"my-project","description":"실험 기록","visibility":"PRIVATE"}`입니다. 성공하면 `201`, `{"projectId":123}`과 상세 URL을 담은 Location 헤더를 반환합니다. `GET /api/v1/projects`는 다른 사용자의 PUBLIC 프로젝트를 포함하지 않는 개인 목록입니다. `page`는 0부터, `size`는 기본 20/최대 100이며 생성 시각과 ID 내림차순으로 정렬합니다. 응답은 `items`, `page`, `size`, `totalElements`, `totalPages`입니다. 공개 프로젝트 탐색용 전체 목록은 별도로 구현하지 않았습니다.
+
+상세/목록 항목에는 `projectId`, `name`, `description`, `createdBy`, `visibility`, `createdAt`, `updatedAt`, `version`이 있습니다. 수정은 상세에서 받은 version과 함께 `{"name":"renamed","description":null,"visibility":"PUBLIC","version":0}`을 PUT으로 전송합니다. 수정 후에는 최신 상세를 다시 조회합니다. 삭제도 같은 조회 버전을 `?version=0`으로 보내며 오래된 수정·삭제 요청은 `409 STALE_STATE`입니다. 소유 관계와 생성 시각은 변경되지 않습니다.
+
+삭제는 소유자·버전 확인 후 프로젝트 키, Run, 파라미터·메트릭·로그·텍스트·시스템/GPU 지표·Run 메타데이터를 한 트랜잭션에서 영구 제거합니다. 중간 실패 시 모두 롤백합니다. 프로젝트 행 잠금은 키 발급, Run 생성, Run 상태 변경 및 기록 추가와 공유하여 삭제와 동시에 고아 데이터가 생기지 않도록 합니다. 기존 키로 진행 중인 요청도 삭제 후 새 Run/기록을 생성할 수 없습니다. 반복 삭제는 404입니다. DB 스키마에 추가 컬럼은 없으며 기존 `database/runs.sql`의 테이블이 준비되어 있어야 합니다.
+
+`ProjectHttpTests`는 실제 JWT·CSRF·보안 필터와 H2에서 CRUD, 공개 범위, 개인 목록, 소유자 권한, 클라이언트 버전 충돌, 종속 데이터 삭제·롤백·동시성을 확인합니다. 테스트 프로필은 로컬 Gmail 설정과 분리하여 외부 메일을 발송하지 않습니다.
 
 ### SDK Run API
 
@@ -135,7 +178,7 @@ Invoke-RestMethod -Method Get -Uri "$sdkUrl/$($run.runId)" -Headers $sdkHeaders
 ### Swagger에서 인증된 요청 실행
 
 1. 서버를 DB와 JWT 설정으로 실행합니다.
-2. 브라우저에 유효한 `access_token` 쿠키가 있어야 합니다. 현재 로그인 HTTP API가 없으므로 Swagger만으로 로그인할 수는 없습니다. 인증 연동은 테스트에서 검증합니다.
+2. Swagger의 `POST /api/v1/auth/login`에 ACTIVE 계정의 이메일/비밀번호를 입력합니다. 성공하면 브라우저에 HttpOnly 인증 쿠키가 저장됩니다.
 3. Swagger의 `GET /api/v1/auth/csrf`를 먼저 실행해 `XSRF-TOKEN` 쿠키를 받습니다.
 4. API 키 발급을 실행하면 Swagger UI가 CSRF 쿠키 원문을 `X-XSRF-TOKEN` 헤더로 보냅니다.
 
@@ -226,13 +269,13 @@ API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습
 
 기록 추가와 종료는 같은 실행 행을 서비스 트랜잭션에서 잠가 직렬화합니다. 저장소의 잠금 조회는 활성 트랜잭션을 요구합니다. 실행 상태 갱신은 도메인의 조회 버전도 검사해 오래된 객체가 종료 상태를 덮어쓰지 못하게 합니다. 기록 배치는 한 트랜잭션이며 일부 값이 잘못되면 전체가 롤백됩니다. 메트릭·로그·텍스트·시스템 지표의 재전송은 새 기록을 추가하므로 자동 재시도/중복 제거는 추후 SDK 계약에서 정해야 합니다.
 
-요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK의 `log/metric/text` 메서드는 아직 구현하지 않았습니다. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
+요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK는 `sdk/src/labflow`에 구현되어 있으며 API key 설정, Run 생성, `params/metric/log/text`, 완료·실패 및 상태 조회를 제공합니다. 설치·사용법과 실제 HTTP 연결 테스트는 [SDK README](../sdk/README.md)를 참고하세요. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
 
 기존 DB에는 `database/runs.sql`을 먼저 적용해야 합니다. 이 DDL은 자동 실행되지 않으며 테스트에서는 H2가 새 테이블을 생성합니다. 실제 MariaDB 마이그레이션 실행은 별도 배포 단계에서 수행합니다.
 
-- `auth`: 비밀번호 로그인, 토큰 생성/회전, 쿠키/JWT 인증
+- `auth`: 회원가입/이메일 인증, 쿠키 로그인·갱신·로그아웃 및 JWT 인증
 - `user`: 사용자 상태 전이, 권한과 프로필 저장
-- `project/project`: 프로젝트 생성 및 저장 모델
+- `project/project`: 개인 프로젝트 CRUD, 공개 범위, 버전 검사 및 종속 데이터 삭제
 - `project/key`: 프로젝트 API 키 발급과 SDK 인증
 - `run`: 실험 실행 수명주기 및 파라미터·메트릭·로그·시스템 지표·텍스트 기록
 - `sdk/presentation`: Bearer 키 전용 SDK HTTP API와 요청·응답 DTO

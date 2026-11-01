@@ -2,6 +2,8 @@ package com.dju.labflow.run.run.application;
 
 import com.dju.labflow.global.validation.InputValidation;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.project.project.domain.repository.ProjectRepository;
+import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.repository.RunRepository;
@@ -13,9 +15,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class RunAccessPolicy {
     private final RunRepository runRepository;
+    private final ProjectRepository projectRepository;
 
-    public RunAccessPolicy(RunRepository runRepository) {
+    public RunAccessPolicy(RunRepository runRepository, ProjectRepository projectRepository) {
         this.runRepository = runRepository;
+        this.projectRepository = projectRepository;
     }
 
     public Run requireOwned(ProjectApiKeyPrincipal principal, RunId runId) {
@@ -29,6 +33,14 @@ public class RunAccessPolicy {
 
     public Run requireOwnedForUpdate(ProjectApiKeyPrincipal principal, RunId runId) {
         InputValidation.required(principal, "SDK principal");
+        // 프로젝트 → 실행 순서로 잠가 삭제 후 고아 기록이 생성되지 않도록 한다.
+        var project =
+                projectRepository
+                        .findByIdForUpdate(
+                                InputValidation.required(principal.projectId(), "Project ID"))
+                        .orElseThrow(ProjectNotFoundException::new);
+        if (!project.getCreatedBy().equals(principal.createdBy()))
+            throw new AccessDeniedException("Project belongs to another owner");
         return check(
                 principal,
                 runRepository

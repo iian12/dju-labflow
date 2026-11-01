@@ -45,7 +45,7 @@ public class TokenRefreshService {
     @Transactional
     public TokenRefreshResult refresh(String rawRefreshToken) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
-            throw new IllegalArgumentException("Refresh token must not be null or blank");
+            throw new InvalidRefreshTokenException();
         }
 
         String tokenHash = refreshTokenHasher.hash(rawRefreshToken);
