@@ -67,6 +67,9 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | GET | `/api/v1/projects/{projectId}` | 공개 범위를 적용한 프로젝트 상세 (200) |
 | PUT | `/api/v1/projects/{projectId}` | 소유자의 전체 정보 수정, 조회 version 필수 (204) |
 | DELETE | `/api/v1/projects/{projectId}?version=0` | 소유자의 프로젝트 및 종속 데이터 삭제 (204) |
+| GET | `/api/v1/projects/{projectId}/runs?page=0&size=20` | 웹 실행 목록 및 프로젝트 전체 상태 집계 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/{runId}` | 웹 실행 상세 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/{runId}/records?limit=1000` | 파라미터·메트릭·로그·텍스트·시스템 지표 조회 (200) |
 | POST | `/api/v1/sdk/runs` | 실행 생성. ID와 Location 반환 (201) |
 | GET | `/api/v1/sdk/runs/{runId}` | 실행 상태·메타데이터 조회 (200) |
 | PUT | `/api/v1/sdk/runs/{runId}/parameters` | 불변 파라미터 추가, 같은 키/값 재전송 허용 (204) |
@@ -115,6 +118,12 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 `ProjectHttpTests`는 실제 JWT·CSRF·보안 필터와 H2에서 CRUD, 공개 범위, 개인 목록, 소유자 권한, 클라이언트 버전 충돌, 종속 데이터 삭제·롤백·동시성을 확인합니다. 테스트 프로필은 로컬 Gmail 설정과 분리하여 외부 메일을 발송하지 않습니다.
 
 ### SDK Run API
+
+웹 화면은 `run/run/presentation/RunQueryController`의 사용자용 조회 API를 사용합니다. `RunQueryService`는 먼저 프로젝트 공개 정책을 확인하고 Run이 URL의 프로젝트에 속하는지 검사합니다. PUBLIC 프로젝트의 실행·기록은 비로그인 조회가 가능하고 PRIVATE은 소유자만 읽을 수 있습니다. 다른 프로젝트 Run ID를 섞으면 404입니다. SDK 키는 웹 사용자 인증을 대체하지 않습니다.
+
+실행 목록은 생성 시각/ID 내림차순, 기본 20개/최대 100개의 페이지이며 전체 `counts.RUNNING/COMPLETED/FAILED`를 함께 반환합니다. records는 각 기록 종류를 시각/ID 오름차순으로 최대 limit개(기본/최대 1000) 반환하고 파라미터는 전체(최대 100개)를 반환합니다. 현재 시계열 커서 페이지네이션은 없으므로 상한 도달 시 프론트에서 제한을 표시합니다. 원문, 사용자 정의 metric 이름과 숫자 값, 선택적인 step/epoch/기록 시각을 보존합니다. 새 테이블이나 스키마 변경은 없습니다.
+
+로컬 `frontend-design` 폴더가 있으면 `http://127.0.0.1:5174/`에서 실제 로그인·프로젝트·SDK 연결·실험 기록 화면을 사용합니다. 해당 폴더는 기존처럼 Git에서 제외하며 API 테스트 도구는 `#/api-test`에 유지합니다. `FrontendBrowserIntegrationTests`는 `LABFLOW_FRONTEND_NODE`를 지정한 경우만 이 로컬 앱으로 실제 브라우저 테스트를 수행합니다.
 
 SDK 경로는 `Authorization: Bearer <project-api-key>`만 사용합니다. JWT 쿠키와 CSRF 토큰은 필요하지 않으며 사용자 JWT를 Bearer 값으로 넣어도 인증되지 않습니다. Swagger의 Authorize에서 `projectApiKey`에 원문 키를 입력할 수 있습니다. SDK 작업의 프로젝트와 소유자는 인증된 키에서 결정되며 요청 파라미터로 변경할 수 없습니다. 같은 프로젝트의 다른 유효한 키는 같은 실행에 접근할 수 있습니다.
 

@@ -3,6 +3,7 @@ package com.dju.labflow.run.run.domain.repository;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.run.run.domain.RunPage;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,4 +20,6 @@ public interface RunRepository {
     Optional<Run> findByIdForUpdate(RunId id);
 
     List<Run> findByProjectId(ProjectId projectId, int limit);
+
+    RunPage findPageByProjectId(ProjectId projectId, int page, int size);
 }

@@ -122,6 +122,12 @@ public class SecurityConfig {
                                         .requestMatchers(
                                                 HttpMethod.GET, "/api/v1/projects/{projectId}")
                                         .permitAll()
+                                        .requestMatchers(
+                                                HttpMethod.GET,
+                                                "/api/v1/projects/{projectId}/runs",
+                                                "/api/v1/projects/{projectId}/runs/{runId}",
+                                                "/api/v1/projects/{projectId}/runs/{runId}/records")
+                                        .permitAll()
                                         .anyRequest()
                                         .authenticated())
                 .addFilterBefore(

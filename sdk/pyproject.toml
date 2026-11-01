@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "labflow-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python SDK for Labflow experiment tracking"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+examples = [
+    "numpy>=1.26,<3",
+    "scikit-learn>=1.5,<2",
+]
 system = [
     "psutil>=6,<9",
     "nvidia-ml-py>=13.580,<14",

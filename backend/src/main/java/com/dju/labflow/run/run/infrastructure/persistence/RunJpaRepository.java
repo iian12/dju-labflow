@@ -1,8 +1,10 @@
 package com.dju.labflow.run.run.infrastructure.persistence;
 
+import com.dju.labflow.run.run.domain.RunStatus;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -16,4 +18,8 @@ public interface RunJpaRepository extends JpaRepository<RunEntity, Long> {
     Optional<RunEntity> findByIdForUpdate(@Param("id") Long id);
 
     List<RunEntity> findByProjectIdOrderByStartedAtDescIdDesc(Long projectId, Pageable pageable);
+
+    Page<RunEntity> findAllByProjectIdOrderByStartedAtDescIdDesc(Long projectId, Pageable pageable);
+
+    long countByProjectIdAndStatus(Long projectId, RunStatus status);
 }

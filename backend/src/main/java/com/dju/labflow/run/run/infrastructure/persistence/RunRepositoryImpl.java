@@ -3,6 +3,8 @@ package com.dju.labflow.run.run.infrastructure.persistence;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.run.run.domain.RunPage;
+import com.dju.labflow.run.run.domain.RunStatus;
 import com.dju.labflow.run.run.domain.RunValidation;
 import com.dju.labflow.run.run.domain.repository.RunRepository;
 import com.dju.labflow.run.run.exception.RunNotFoundException;
@@ -67,5 +69,23 @@ public class RunRepositoryImpl implements RunRepository {
                 .stream()
                 .map(RunMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public RunPage findPageByProjectId(ProjectId projectId, int page, int size) {
+        Objects.requireNonNull(projectId, "Project ID must not be null");
+        if (page < 0 || size < 1 || size > 100)
+            throw new IllegalArgumentException("Invalid run page");
+        var result =
+                runJpaRepository.findAllByProjectIdOrderByStartedAtDescIdDesc(
+                        projectId.value(), PageRequest.of(page, size));
+        return new RunPage(
+                result.stream().map(RunMapper::toDomain).toList(),
+                page,
+                size,
+                result.getTotalElements(),
+                runJpaRepository.countByProjectIdAndStatus(projectId.value(), RunStatus.RUNNING),
+                runJpaRepository.countByProjectIdAndStatus(projectId.value(), RunStatus.COMPLETED),
+                runJpaRepository.countByProjectIdAndStatus(projectId.value(), RunStatus.FAILED));
     }
 }

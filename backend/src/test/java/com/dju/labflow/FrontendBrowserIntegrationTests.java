@@ -122,7 +122,7 @@ class FrontendBrowserIntegrationTests {
         String report = Files.readString(output, StandardCharsets.UTF_8);
         assertThat(finished).as("Browser process timed out: %s", report).isTrue();
         assertThat(process.exitValue()).as("Browser integration: %s", report).isZero();
-        assertThat(report).contains("PASS: all 22 API operations");
+        assertThat(report).contains("PASS: all 25 API operations");
         var user = users.findByEmail(email).orElseThrow();
         assertThat(user.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE);
         verify(sender).send(email, "ABC234");
