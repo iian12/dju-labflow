@@ -18,7 +18,8 @@ public class RunLogEntity extends AssignedIdEntity {
     private Long runId;
 
     @Lob
-    @Column(nullable = false, updatable = false)
+    // Match the API limit and deployment DDL instead of MariaDB's default-sized TINYTEXT.
+    @Column(nullable = false, updatable = false, columnDefinition = "LONGTEXT")
     private String message;
 
     @Enumerated(EnumType.STRING)

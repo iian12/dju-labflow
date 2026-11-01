@@ -10,6 +10,7 @@ import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import com.dju.labflow.user.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
+import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -153,6 +154,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<SecurityErrorResponse> dataConflict(
             DataIntegrityViolationException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql && "22001".equals(sql.getSQLState())) {
+                // Validated input that exceeds the actual column capacity is a server storage
+                // mismatch, not a duplicate request. Never expose SQL or record contents.
+                return error(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "DATA_STORAGE_ERROR",
+                        "Server could not store the record");
+            }
+        }
         // 사전 중복 검사 이후 동시에 INSERT된 경우도 500 대신 409로 처리한다.
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Request conflicts with existing data");
     }

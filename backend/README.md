@@ -282,6 +282,8 @@ API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습
 
 기존 DB에는 `database/runs.sql`을 먼저 적용해야 합니다. 이 DDL은 자동 실행되지 않으며 테스트에서는 H2가 새 테이블을 생성합니다. 실제 MariaDB 마이그레이션 실행은 별도 배포 단계에서 수행합니다.
 
+기존 `@Lob` 기본 매핑으로 생성한 MariaDB의 `run_text_entity.text`와 `run_log_entity.message`가 `TINYTEXT`라면 255바이트를 넘는 분류 보고서·로그가 저장되지 않습니다. 수정된 JPA 매핑은 배포 DDL과 동일하게 `LONGTEXT`를 명시합니다. 기존 DB는 `database/expand-run-text-columns.sql`로 두 열을 확장하며 기존 기록은 보존합니다. API의 텍스트 65,536자·로그 16,000자 제한은 유지합니다. DB 용량 불일치(SQLState 22001)는 중복 데이터 충돌과 구분하여 `500 DATA_STORAGE_ERROR`로 응답합니다.
+
 - `auth`: 회원가입/이메일 인증, 쿠키 로그인·갱신·로그아웃 및 JWT 인증
 - `user`: 사용자 상태 전이, 권한과 프로필 저장
 - `project/project`: 개인 프로젝트 CRUD, 공개 범위, 버전 검사 및 종속 데이터 삭제

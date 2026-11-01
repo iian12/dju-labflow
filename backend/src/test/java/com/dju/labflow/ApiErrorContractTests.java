@@ -9,6 +9,7 @@ import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import jakarta.validation.Valid;
+import java.sql.SQLDataException;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -42,6 +43,19 @@ class ApiErrorContractTests {
                                         org.hamcrest.Matchers.not(
                                                 org.hamcrest.Matchers.containsString(
                                                         "private SQL"))));
+    }
+
+    @Test
+    void databaseCapacityMismatchIsNotReportedAsADuplicateConflict() throws Exception {
+        mvc.perform(post("/test-errors/storage-capacity"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("DATA_STORAGE_ERROR"))
+                .andExpect(
+                        content()
+                                .string(
+                                        org.hamcrest.Matchers.not(
+                                                org.hamcrest.Matchers.containsString(
+                                                        "private SQL or text"))));
     }
 
     @Test
@@ -101,6 +115,13 @@ class ApiErrorContractTests {
         @PostMapping("/conflict")
         void conflict() {
             throw new DataIntegrityViolationException("private SQL");
+        }
+
+        @PostMapping("/storage-capacity")
+        void storageCapacity() {
+            throw new DataIntegrityViolationException(
+                    "private SQL or text",
+                    new SQLDataException("private SQL or text", "22001", 1406));
         }
 
         @PostMapping("/signup")

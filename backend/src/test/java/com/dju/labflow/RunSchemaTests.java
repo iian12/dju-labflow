@@ -2,15 +2,51 @@ package com.dju.labflow;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.dju.labflow.run.log.infrastructure.persistence.RunLogEntity;
+import com.dju.labflow.run.text.infrastructure.persistence.RunTextEntity;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashSet;
+import org.hibernate.boot.MetadataSources;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 
 /** 배포 DDL의 기본 문법과 키 제약을 격리된 H2 MariaDB 모드에서 검사한다. */
 class RunSchemaTests {
+    @Test
+    void mariaDbMappingDoesNotShrinkTextAndLogColumnsToTinytext() {
+        var registry =
+                new StandardServiceRegistryBuilder()
+                        .applySetting("hibernate.dialect", "org.hibernate.dialect.MariaDBDialect")
+                        .applySetting("hibernate.boot.allow_jdbc_metadata_access", false)
+                        .build();
+        try {
+            var metadata =
+                    new MetadataSources(registry)
+                            .addAnnotatedClass(RunTextEntity.class)
+                            .addAnnotatedClass(RunLogEntity.class)
+                            .buildMetadata();
+            assertThat(
+                            metadata.getEntityBinding(RunTextEntity.class.getName())
+                                    .getProperty("text")
+                                    .getColumns()
+                                    .getFirst()
+                                    .getSqlType(metadata))
+                    .isEqualToIgnoringCase("longtext");
+            assertThat(
+                            metadata.getEntityBinding(RunLogEntity.class.getName())
+                                    .getProperty("message")
+                                    .getColumns()
+                                    .getFirst()
+                                    .getSqlType(metadata))
+                    .isEqualToIgnoringCase("longtext");
+        } finally {
+            StandardServiceRegistryBuilder.destroy(registry);
+        }
+    }
+
     @Test
     void deploymentDdlCreatesAllTablesAndEnforcesParameterIdentity() throws Exception {
         try (var connection =

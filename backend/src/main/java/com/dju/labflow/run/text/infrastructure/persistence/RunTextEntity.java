@@ -21,7 +21,8 @@ public class RunTextEntity extends AssignedIdEntity {
     private String key;
 
     @Lob
-    @Column(nullable = false, updatable = false)
+    // Without an explicit type MariaDB may choose TINYTEXT (255 bytes) for a default-sized LOB.
+    @Column(nullable = false, updatable = false, columnDefinition = "LONGTEXT")
     private String text;
 
     @Column(updatable = false)

@@ -52,6 +52,36 @@ import tools.jackson.databind.json.JsonMapper;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class SdkRunHttpTests {
+    @Test
+    void textAndLogsRoundTripTheirFullUnicodeLimits() throws Exception {
+        Client client = client();
+        RunId id = create(client);
+        String report = "분".repeat(65536);
+        String message = "학".repeat(16000);
+        write(
+                        client,
+                        id,
+                        "/texts",
+                        jsonMapper.writeValueAsString(Map.of("key", "report", "text", report)))
+                .andExpect(status().isNoContent());
+        write(
+                        client,
+                        id,
+                        "/logs",
+                        jsonMapper.writeValueAsString(
+                                Map.of("message", message, "level", "INFO", "source", "USER")))
+                .andExpect(status().isNoContent());
+        assertThat(texts.findByRunId(id, 10).getFirst().getText()).isEqualTo(report);
+        assertThat(logs.findByRunId(id, 10).getFirst().getMessage()).isEqualTo(message);
+        write(
+                        client,
+                        id,
+                        "/texts",
+                        jsonMapper.writeValueAsString(
+                                Map.of("key", "too-long", "text", report + "분")))
+                .andExpect(status().isBadRequest());
+    }
+
     private static final String BASE = "/api/v1/sdk/runs";
     private static final AtomicLong IDS = new AtomicLong(200000L);
     private final List<Long> owners = new ArrayList<>();
