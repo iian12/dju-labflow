@@ -1,0 +1,2 @@
+# GitHub SDK commit verified for this standalone test project (version 0.1.1).
+labflow-sdk[examples] @ git+https://github.com/iian12/dju-labflow.git@70e99c7d7d346bf2960d5b84d51d2501f4924f6f#subdirectory=sdk
