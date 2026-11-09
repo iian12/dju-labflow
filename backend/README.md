@@ -157,6 +157,8 @@ Invoke-RestMethod -Method Get -Uri "$sdkUrl/$($run.runId)" -Headers $sdkHeaders
 
 ### 이메일 코드로 회원가입
 
+이메일 인증을 완료하지 않고 나갔다가 다시 로그인하면, 비밀번호가 올바른 경우 `401 EMAIL_VERIFICATION_REQUIRED`를 반환합니다. 프론트는 이메일을 유지하고 비밀번호를 지운 뒤 인증 화면으로 이동합니다. 기존 코드가 만료되었다면 해당 화면에서 재발송을 요청할 수 있습니다. 틀린 비밀번호와 차단 계정은 기존 `401 UNAUTHORIZED`를 유지하며 인증 쿠키는 발급하지 않습니다.
+
 1. `POST /api/v1/auth/sign-up`에 `email`, `password`, `confirmPassword`, `name`을 보냅니다.
 2. 이메일로 받은 6자리 영문/숫자 코드를 입력합니다. I/L/O/0/1은 생성하지 않습니다.
 3. `GET /api/v1/auth/csrf`로 CSRF 쿠키를 받은 뒤, 쿠키와 `X-XSRF-TOKEN` 헤더를 함께 전송합니다.

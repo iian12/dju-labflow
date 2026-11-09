@@ -7,11 +7,13 @@ import com.dju.labflow.auth.domain.RefreshToken;
 import com.dju.labflow.auth.domain.RefreshTokenHasher;
 import com.dju.labflow.auth.domain.RefreshTokenId;
 import com.dju.labflow.auth.domain.RefreshTokenRepository;
+import com.dju.labflow.auth.domain.exception.EmailVerificationRequiredException;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.security.LoginUserDetails;
 import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.global.validation.InputValidation;
 import com.dju.labflow.global.validation.RequestValidator;
+import com.dju.labflow.user.domain.AccountStatus;
 import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import com.dju.labflow.user.domain.repository.UserRepository;
@@ -20,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -100,10 +103,24 @@ public class AuthService {
         // 가입과 마찬가지로 BCrypt의 UTF-8 바이트 한도를 넘는 원문은 변형하지 않고 거부한다.
         if (command.password().getBytes(StandardCharsets.UTF_8).length > 72)
             throw new IllegalArgumentException("Password exceeds 72 UTF-8 bytes");
-        Authentication authentication =
-                authenticationManager.authenticate(
-                        new UsernamePasswordAuthenticationToken(
-                                command.email(), command.password()));
+        Authentication authentication;
+        try {
+            authentication =
+                    authenticationManager.authenticate(
+                            new UsernamePasswordAuthenticationToken(
+                                    command.email(), command.password()));
+        } catch (DisabledException exception) {
+            // Spring checks disabled status before the password. Only reveal the
+            // verification state after independently checking the supplied password.
+            var pending = userRepository.findByEmail(command.email());
+            if (pending.isPresent()
+                    && pending.get().getAccountStatus() == AccountStatus.PENDING_VERIFICATION
+                    && passwordEncoder.matches(
+                            command.password(), pending.get().getEncodedPassword())) {
+                throw new EmailVerificationRequiredException();
+            }
+            throw exception;
+        }
 
         Object principal = authentication.getPrincipal();
 

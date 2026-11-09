@@ -249,7 +249,25 @@ class AuthHttpTests {
         User user = user(status);
         loginResponse(user)
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+                .andExpect(
+                        jsonPath("$.code")
+                                .value(
+                                        status == AccountStatus.PENDING_VERIFICATION
+                                                ? "EMAIL_VERIFICATION_REQUIRED"
+                                                : "UNAUTHORIZED"))
+                .andExpect(cookie().doesNotExist("access_token"))
+                .andExpect(cookie().doesNotExist("refresh_token"));
+        assertThat(activeTokens(user.getId())).isZero();
+    }
+
+    @Test
+    void pendingAccountWithWrongPasswordDoesNotRevealVerificationState() throws Exception {
+        User user = user(AccountStatus.PENDING_VERIFICATION);
+        credentials(user.getEmail(), "incorrect-password")
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(cookie().doesNotExist("access_token"))
+                .andExpect(cookie().doesNotExist("refresh_token"));
         assertThat(activeTokens(user.getId())).isZero();
     }
 

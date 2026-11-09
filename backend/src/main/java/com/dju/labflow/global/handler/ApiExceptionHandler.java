@@ -1,5 +1,6 @@
 package com.dju.labflow.global.handler;
 
+import com.dju.labflow.auth.domain.exception.EmailVerificationRequiredException;
 import com.dju.labflow.auth.domain.exception.RefreshTokenException;
 import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
@@ -174,6 +175,15 @@ public class ApiExceptionHandler {
     })
     public ResponseEntity<SecurityErrorResponse> staleState(RuntimeException exception) {
         return error(HttpStatus.CONFLICT, "STALE_STATE", "Resource changed; reload and retry");
+    }
+
+    @ExceptionHandler(EmailVerificationRequiredException.class)
+    public ResponseEntity<SecurityErrorResponse> emailVerificationRequired(
+            EmailVerificationRequiredException exception) {
+        return error(
+                HttpStatus.UNAUTHORIZED,
+                "EMAIL_VERIFICATION_REQUIRED",
+                "Email verification is required");
     }
 
     @ExceptionHandler({AuthenticationException.class, RefreshTokenException.class})
