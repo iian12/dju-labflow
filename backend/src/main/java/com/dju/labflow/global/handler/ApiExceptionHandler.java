@@ -8,6 +8,7 @@ import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.project.project.exception.ProjectVersionConflictException;
 import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.run.run.exception.RunStateConflictException;
+import com.dju.labflow.sdk.request.domain.RequestIdConflictException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import com.dju.labflow.user.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -32,6 +33,15 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 /** MVC와 서비스의 예상 가능한 실패를 일관된 HTTP 상태/오류 본문으로 변환한다. */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(RequestIdConflictException.class)
+    public ResponseEntity<SecurityErrorResponse> requestIdConflict(
+            RequestIdConflictException exception) {
+        return error(
+                HttpStatus.CONFLICT,
+                "REQUEST_ID_CONFLICT",
+                "requestId was already used for a different request");
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<SecurityErrorResponse> invalidBody(
             MethodArgumentNotValidException exception) {

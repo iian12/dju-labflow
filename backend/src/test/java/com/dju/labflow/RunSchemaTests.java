@@ -16,6 +16,32 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 /** 배포 DDL의 기본 문법과 키 제약을 격리된 H2 MariaDB 모드에서 검사한다. */
 class RunSchemaTests {
     @Test
+    void sdkRequestMigrationIsRepeatableAndScopesIdentityToProject() throws Exception {
+        try (var connection =
+                DriverManager.getConnection("jdbc:h2:mem:sdk-request-ddl;MODE=MariaDB", "sa", "")) {
+            var migration = new FileSystemResource("database/sdk-requests.sql");
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+            try (var statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
+                                + "values(1,1,'key','hash',1,current_timestamp)");
+                assertThatThrownBy(
+                                () ->
+                                        statement.executeUpdate(
+                                                "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
+                                                        + "values(2,1,'key','hash',1,current_timestamp)"))
+                        .isInstanceOf(SQLException.class);
+                assertThat(
+                                statement.executeUpdate(
+                                        "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
+                                                + "values(2,2,'key','hash',2,current_timestamp)"))
+                        .isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
     void heartbeatMigrationPreservesExistingRuns() throws Exception {
         try (var connection =
                 DriverManager.getConnection("jdbc:h2:mem:heartbeat-ddl;MODE=MariaDB", "sa", "")) {

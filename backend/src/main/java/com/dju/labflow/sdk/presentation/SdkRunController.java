@@ -5,6 +5,7 @@ import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
 import com.dju.labflow.run.run.application.RunRecordService;
 import com.dju.labflow.run.run.application.RunService;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.sdk.request.application.SdkRequestService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -45,14 +46,19 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
     @ApiResponse(
             responseCode = "409",
-            description = "종료 상태/파라미터 값/저장 버전 충돌",
+            description = "종료 상태/파라미터 값/저장 버전/requestId 충돌",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class)))
 })
 public class SdkRunController {
+    private final SdkRequestService requestService;
     private final RunService runService;
     private final RunRecordService runRecordService;
 
-    public SdkRunController(RunService runService, RunRecordService runRecordService) {
+    public SdkRunController(
+            RunService runService,
+            RunRecordService runRecordService,
+            SdkRequestService requestService) {
+        this.requestService = requestService;
         this.runService = runService;
         this.runRecordService = runRecordService;
     }
@@ -62,8 +68,20 @@ public class SdkRunController {
     @ApiResponse(responseCode = "201", description = "RUNNING 실행 생성, Location 헤더로 조회 경로 제공")
     public ResponseEntity<RunCreateResponse> create(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Valid @RequestBody RunCreateRequest request) {
-        RunId runId = runService.create(principal, request.toCommand());
+        RunId runId =
+                requestService.execute(
+                        principal,
+                        requestId,
+                        "create",
+                        null,
+                        request.toCommand(),
+                        () -> runService.create(principal, request.toCommand()));
         var location =
                 ServletUriComponentsBuilder.fromCurrentRequestUri()
                         .path("/{runId}")
@@ -86,9 +104,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "파라미터 반영", content = @Content)
     public ResponseEntity<Void> parameters(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody RunParameterRequest request) {
-        runRecordService.parameters(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "parameters",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runRecordService.parameters(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -99,9 +131,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "메트릭 기록", content = @Content)
     public ResponseEntity<Void> metrics(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody MetricRequest request) {
-        runRecordService.metrics(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "metrics",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runRecordService.metrics(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -112,9 +158,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "로그 기록", content = @Content)
     public ResponseEntity<Void> log(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody LogCreateRequest request) {
-        runRecordService.log(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "log",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runRecordService.log(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -123,9 +183,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "텍스트 기록", content = @Content)
     public ResponseEntity<Void> text(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody TextCreateRequest request) {
-        runRecordService.text(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "text",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runRecordService.text(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -134,9 +208,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "시스템 지표 기록", content = @Content)
     public ResponseEntity<Void> systemMetric(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody SystemMetricCreateRequest request) {
-        runRecordService.systemMetric(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "systemMetric",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runRecordService.systemMetric(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -147,8 +235,22 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "생존 시각 갱신", content = @Content)
     public ResponseEntity<Void> heartbeat(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId) {
-        runService.heartbeat(principal, RunId.of(runId));
+        requestService.execute(
+                principal,
+                requestId,
+                "heartbeat",
+                RunId.of(runId),
+                null,
+                () -> {
+                    runService.heartbeat(principal, RunId.of(runId));
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -157,8 +259,22 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "완료 처리", content = @Content)
     public ResponseEntity<Void> complete(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId) {
-        runService.complete(principal, RunId.of(runId));
+        requestService.execute(
+                principal,
+                requestId,
+                "complete",
+                RunId.of(runId),
+                null,
+                () -> {
+                    runService.complete(principal, RunId.of(runId));
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 
@@ -167,9 +283,23 @@ public class SdkRunController {
     @ApiResponse(responseCode = "204", description = "실패 처리", content = @Content)
     public ResponseEntity<Void> fail(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Parameter(
+                            description =
+                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
+                    @RequestHeader(value = "X-Request-ID", required = false)
+                    String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody RunFailRequest request) {
-        runService.fail(principal, RunId.of(runId), request.toCommand());
+        requestService.execute(
+                principal,
+                requestId,
+                "fail",
+                RunId.of(runId),
+                request.toCommand(),
+                () -> {
+                    runService.fail(principal, RunId.of(runId), request.toCommand());
+                    return RunId.of(runId);
+                });
         return ResponseEntity.noContent().build();
     }
 }

@@ -4,7 +4,9 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from uuid import uuid4
 
+import httpx
 import pytest
 
 import labflow
@@ -141,3 +143,84 @@ def test_automatic_telemetry(settings, client):
     time.sleep(0.1)
     assert client.get_run(run.id)["lastHeartbeatAt"] == status["lastHeartbeatAt"]
     assert run.telemetry_status["errors"] == 0
+
+
+def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
+    url, key, _ = settings
+
+    class LoseAcknowledgment(httpx.BaseTransport):
+        def __init__(self):
+            self.inner = httpx.HTTPTransport()
+            self.lost = set()
+            self.attempts = []
+
+        def handle_request(self, request):
+            identity = request.headers.get("X-Request-ID")
+            self.attempts.append((identity, request.content))
+            response = self.inner.handle_request(request)
+            if identity and response.status_code < 400 and identity not in self.lost:
+                self.lost.add(identity)
+                response.read()
+                response.close()
+                raise httpx.ReadTimeout("Simulated lost acknowledgment after actual server commit")
+            return response
+
+        def close(self):
+            self.inner.close()
+
+    transport = LoseAcknowledgment()
+    with Client(
+        api_key=key,
+        base_url=url,
+        transport=transport,
+        max_retries=1,
+        collect_environment=False,
+        capture_output=False,
+        system_metrics_interval=None,
+        heartbeat_interval=None,
+    ) as connection:
+        create_id, metric_id, log_id = (str(uuid4()) for _ in range(3))
+        with connection.start_run("python-sdk-idempotent", request_id=create_id) as run:
+            assert connection.start_run("python-sdk-idempotent", request_id=create_id) is run
+            run.params({"seed": 42})
+            run.metric(
+                {"loss": 0.125, "accuracy": 0.9}, step=1, elapsed_time=1.0, request_id=metric_id
+            )
+            run.metric(
+                {"loss": 0.125, "accuracy": 0.9}, step=1, elapsed_time=1.0, request_id=metric_id
+            )
+            run.log("persist exactly once", request_id=log_id)
+            run.log("persist exactly once", request_id=log_id)
+            run.text("prediction", "cat")
+            connection._request(
+                "POST",
+                f"{run._path}/system-metrics",
+                body={
+                    "system": {"cpuUtilization": 50, "ramUsed": 512, "ramTotal": 1024},
+                    "elapsedTime": 1.0,
+                },
+            )
+            run.heartbeat()
+            with pytest.raises(ConflictError) as error:
+                run.log("different content", request_id=log_id)
+            assert error.value.code == "REQUEST_ID_CONFLICT"
+        # Successful replays still work after the Run has reached a terminal state.
+        connection._request(
+            "POST",
+            f"{run._path}/logs",
+            request_id=log_id,
+            body={"message": "persist exactly once", "source": "USER", "level": "INFO"},
+        )
+        failed = connection.start_run("python-sdk-idempotent-failed")
+        failed.fail("lost failure acknowledgment")
+        assert failed.state == "FAILED"
+    assert client.get_run(run.id)["status"] == "COMPLETED"
+    assert client.get_run(failed.id)["status"] == "FAILED"
+    assert len(transport.lost) == 10
+    for identity in transport.lost:
+        attempts = [body for request_id, body in transport.attempts if request_id == identity]
+        # One intentional 409 sends different content for the already used log identity.
+        if identity == log_id:
+            assert attempts[0] == attempts[1]
+        else:
+            assert len(attempts) >= 2 and len(set(attempts)) == 1

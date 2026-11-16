@@ -1,9 +1,12 @@
-"""Synchronous SDK-only HTTP client. Writes are never automatically retried."""
+"""Synchronous SDK HTTP client with stable identities for retryable writes."""
 
 import os
+import re
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import httpx
 
@@ -46,6 +49,7 @@ class Client:
         capture_output: bool = True,
         system_metrics_interval: float | None = 10.0,
         heartbeat_interval: float | None = 30.0,
+        max_retries: int = 0,
     ) -> None:
         key = api_key if api_key is not None else os.getenv("LABFLOW_API_KEY")
         if not isinstance(key, str) or not key or any(not 33 <= ord(c) <= 126 for c in key):
@@ -77,6 +81,10 @@ class Client:
                 "Use an absolute HTTP(S) backend URL and a positive timeout"
             ) from None
         self._api_key = key
+        try:
+            self._max_retries = validate.integer(max_retries, "max_retries", maximum=5)
+        except ValidationError:
+            raise ConfigurationError("max_retries must be an integer from 0 to 5") from None
         if type(collect_environment) is not bool or type(capture_output) is not bool:
             raise ConfigurationError("collect_environment and capture_output must be booleans")
         for interval in (system_metrics_interval, heartbeat_interval):
@@ -123,7 +131,13 @@ class Client:
             run.close()
         self._http.close()
 
-    def start_run(self, name: str, *, metadata: Mapping[str, Scalar] | None = None) -> "Run":
+    def start_run(
+        self,
+        name: str,
+        *,
+        metadata: Mapping[str, Scalar] | None = None,
+        request_id: str | None = None,
+    ) -> "Run":
         from ._telemetry import environment
         from .run import Run
 
@@ -133,13 +147,17 @@ class Client:
             collected.update(validate.string_map(metadata, "Metadata", empty=True))
         if collected or metadata is not None:
             body["metadata"] = validate.string_map(collected, "Metadata", empty=True)
-        data = self._request("POST", _ROOT, body=body, expected=201)
+        data = self._request("POST", _ROOT, body=body, expected=201, request_id=request_id)
         try:
             run_id = validate.integer(data["runId"], "Run ID", minimum=1)
         except (ValidationError, KeyError, TypeError):
             raise ProtocolError(
                 "Run creation response must contain a positive 64-bit runId"
             ) from None
+        if request_id is not None:
+            for existing in self._runs:
+                if existing.id == run_id:
+                    return existing
         run = Run(self, run_id)
         self._runs.add(run)
         run._start_telemetry(
@@ -163,24 +181,51 @@ class Client:
         return value.replace(self._api_key, "[REDACTED]")
 
     def _request(
-        self, method: str, path: str, *, body: dict | None = None, expected: int = 204
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict | None = None,
+        expected: int = 204,
+        request_id: str | None = None,
     ) -> Any:
         if self.closed:
             raise RunStateError("Client is closed")
-        try:
-            response = (
-                self._http.request(method, path, json=body)
-                if body is not None
-                else self._http.request(method, path)
-            )
-        except httpx.TimeoutException:
-            raise NetworkError(
-                "LabFlow request timed out; server-side outcome is unknown. No retry was made."
-            ) from None
-        except httpx.RequestError:
-            raise NetworkError(
-                "LabFlow connection failed; server-side outcome may be unknown. No retry was made."
-            ) from None
+        writing = method in {"POST", "PUT", "PATCH", "DELETE"}
+        if writing:
+            if request_id is None:
+                request_id = str(uuid4())
+            elif not isinstance(request_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9_-]{1,64}", request_id
+            ):
+                raise ValidationError(
+                    "request_id must contain 1 to 64 ASCII letters, digits, - or _"
+                )
+        # Freeze the body once, including automatically generated timestamps/elapsed time.
+        request = self._http.build_request(
+            method,
+            path,
+            headers={"X-Request-ID": request_id} if writing else {},
+            **({"json": body} if body is not None else {}),
+        )
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._http.send(request)
+            except httpx.RequestError:
+                if attempt < self._max_retries:
+                    time.sleep(0.2 * 2**attempt)
+                    continue
+                raise NetworkError(
+                    "LabFlow connection failed or timed out; server-side outcome may be unknown. "
+                    "Reuse the original request_id and body when retrying.",
+                    request_id=request_id,
+                    attempts=attempt + 1,
+                ) from None
+            if response.status_code in {502, 503, 504} and attempt < self._max_retries:
+                response.close()
+                time.sleep(0.2 * 2**attempt)
+                continue
+            break
         if 300 <= response.status_code < 400:
             raise ProtocolError("LabFlow returned a redirect; configure the final backend base_url")
         if response.status_code >= 400:

@@ -69,12 +69,13 @@ class Run:
     def _path(self) -> str:
         return f"api/v1/sdk/runs/{self.id}"
 
-    def params(self, parameters: Mapping[str, Scalar]) -> None:
+    def params(self, parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
         self._running()
         self._client._request(
             "PUT",
             f"{self._path}/parameters",
             body={"parameters": validate.string_map(parameters, "Parameters")},
+            request_id=request_id,
         )
 
     def metric(
@@ -85,6 +86,7 @@ class Run:
         epoch: int | None = None,
         elapsed_time: float | None = None,
         recorded_at: datetime | None = None,
+        request_id: str | None = None,
     ) -> None:
         self._running()
         metrics = {
@@ -105,7 +107,7 @@ class Run:
             body["epoch"] = validate.integer(epoch, "Epoch", validate.INT_MAX)
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/metrics", body=body)
+        self._client._request("POST", f"{self._path}/metrics", body=body, request_id=request_id)
 
     def log(
         self,
@@ -114,6 +116,7 @@ class Run:
         level: str = "INFO",
         source: str = "USER",
         recorded_at: datetime | None = None,
+        request_id: str | None = None,
     ) -> None:
         self._running()
         level = validate.text(level, "Log level", 16).upper()
@@ -129,7 +132,7 @@ class Run:
         }
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/logs", body=body)
+        self._client._request("POST", f"{self._path}/logs", body=body, request_id=request_id)
 
     def text(
         self,
@@ -138,6 +141,7 @@ class Run:
         *,
         step: int | None = None,
         recorded_at: datetime | None = None,
+        request_id: str | None = None,
     ) -> None:
         self._running()
         body = {
@@ -148,25 +152,27 @@ class Run:
             body["step"] = validate.integer(step, "Step")
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/texts", body=body)
+        self._client._request("POST", f"{self._path}/texts", body=body, request_id=request_id)
 
-    def finish(self) -> None:
+    def finish(self, *, request_id: str | None = None) -> None:
         if self._state == "COMPLETED":
             return
         self._running()
         self._stop_telemetry()
-        self._client._request("POST", f"{self._path}/complete")
+        self._client._request("POST", f"{self._path}/complete", request_id=request_id)
         self._state = "COMPLETED"
         self._terminal()
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str, *, request_id: str | None = None) -> None:
         error = validate.text(error, "Failure reason", 4000)
         error = self._client._redact(error)
         if self._state == "FAILED" and self._failure == error:
             return
         self._running()
         self._stop_telemetry()
-        self._client._request("POST", f"{self._path}/fail", body={"error": error})
+        self._client._request(
+            "POST", f"{self._path}/fail", body={"error": error}, request_id=request_id
+        )
         self._state, self._failure = "FAILED", error
         self._terminal()
 
@@ -185,10 +191,10 @@ class Run:
         if self._owns_client:
             self._client.close()
 
-    def heartbeat(self) -> None:
+    def heartbeat(self, *, request_id: str | None = None) -> None:
         """Refresh the server's lastHeartbeatAt using the server clock."""
         self._running()
-        self._client._request("POST", f"{self._path}/heartbeat")
+        self._client._request("POST", f"{self._path}/heartbeat", request_id=request_id)
 
     def __enter__(self) -> "Run":
         self._running()

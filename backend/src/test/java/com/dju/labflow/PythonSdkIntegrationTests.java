@@ -128,10 +128,10 @@ class PythonSdkIntegrationTests {
                         .replace(otherKey, "[REDACTED]");
         assertThat(finished).as("Python SDK test process timed out: %s", report).isTrue();
         assertThat(process.exitValue()).as("Python SDK HTTP tests: %s", report).isZero();
-        assertThat(report).contains("5 passed");
+        assertThat(report).contains("6 passed");
 
         List<Run> saved = runs.findByProjectId(projectId, 100);
-        assertThat(saved).hasSize(6).allSatisfy(run -> assertThat(run.getEndedAt()).isNotNull());
+        assertThat(saved).hasSize(8).allSatisfy(run -> assertThat(run.getEndedAt()).isNotNull());
         Run completed = named(saved, "python-sdk-completed");
         assertThat(completed.getStatus()).isEqualTo(RunStatus.COMPLETED);
         assertThat(completed.getMetadata())
@@ -211,6 +211,19 @@ class PythonSdkIntegrationTests {
                                                 });
                             }
                         });
+        Run idempotent = named(saved, "python-sdk-idempotent");
+        assertThat(idempotent.getStatus()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(parameters.findByRunId(idempotent.getId())).hasSize(1);
+        assertThat(metrics.findByRunId(idempotent.getId(), 100)).hasSize(2);
+        assertThat(logs.findByRunId(idempotent.getId(), 100))
+                .singleElement()
+                .satisfies(log -> assertThat(log.getMessage()).isEqualTo("persist exactly once"));
+        assertThat(texts.findByRunId(idempotent.getId(), 100)).hasSize(1);
+        assertThat(systemMetrics.findByRunId(idempotent.getId(), 100)).hasSize(1);
+        assertThat(idempotent.getLastHeartbeatAt()).isNotNull();
+        Run idempotentFailed = named(saved, "python-sdk-idempotent-failed");
+        assertThat(idempotentFailed.getStatus()).isEqualTo(RunStatus.FAILED);
+        assertThat(idempotentFailed.getError()).isEqualTo("lost failure acknowledgment");
         Run failed = named(saved, "python-sdk-failed");
         assertThat(failed.getStatus()).isEqualTo(RunStatus.FAILED);
         assertThat(failed.getError()).isEqualTo("ValueError: training failed");

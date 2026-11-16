@@ -67,6 +67,8 @@ def init(
     capture_output: bool = True,
     system_metrics_interval: float | None = 10.0,
     heartbeat_interval: float | None = 30.0,
+    max_retries: int = 0,
+    request_id: str | None = None,
 ) -> Run:
     previous = _context.current.get()
     if (
@@ -84,9 +86,10 @@ def init(
         capture_output=capture_output,
         system_metrics_interval=system_metrics_interval,
         heartbeat_interval=heartbeat_interval,
+        max_retries=max_retries,
     )
     try:
-        run = client.start_run(name, metadata=metadata)
+        run = client.start_run(name, metadata=metadata, request_id=request_id)
     except BaseException:
         client.close()
         raise
@@ -95,8 +98,8 @@ def init(
     return run
 
 
-def params(parameters: Mapping[str, Scalar]) -> None:
-    current_run().params(parameters)
+def params(parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
+    current_run().params(parameters, request_id=request_id)
 
 
 def metric(
@@ -106,31 +109,49 @@ def metric(
     epoch: int | None = None,
     elapsed_time: float | None = None,
     recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
     current_run().metric(
-        values, step=step, epoch=epoch, elapsed_time=elapsed_time, recorded_at=recorded_at
+        values,
+        step=step,
+        epoch=epoch,
+        elapsed_time=elapsed_time,
+        recorded_at=recorded_at,
+        request_id=request_id,
     )
 
 
 def log(
-    message: str, *, level: str = "INFO", source: str = "USER", recorded_at: datetime | None = None
+    message: str,
+    *,
+    level: str = "INFO",
+    source: str = "USER",
+    recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
-    current_run().log(message, level=level, source=source, recorded_at=recorded_at)
+    current_run().log(
+        message, level=level, source=source, recorded_at=recorded_at, request_id=request_id
+    )
 
 
 def text(
-    key: str, value: str, *, step: int | None = None, recorded_at: datetime | None = None
+    key: str,
+    value: str,
+    *,
+    step: int | None = None,
+    recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
-    current_run().text(key, value, step=step, recorded_at=recorded_at)
+    current_run().text(key, value, step=step, recorded_at=recorded_at, request_id=request_id)
 
 
-def finish() -> None:
-    current_run().finish()
+def finish(*, request_id: str | None = None) -> None:
+    current_run().finish(request_id=request_id)
 
 
-def fail(error: str) -> None:
-    current_run().fail(error)
+def fail(error: str, *, request_id: str | None = None) -> None:
+    current_run().fail(error, request_id=request_id)
 
 
-def heartbeat() -> None:
-    current_run().heartbeat()
+def heartbeat(*, request_id: str | None = None) -> None:
+    current_run().heartbeat(request_id=request_id)

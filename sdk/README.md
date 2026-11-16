@@ -116,7 +116,7 @@ with labflow.init(
 
 출력 캡처는 Python의 `sys.stdout`/`sys.stderr` 텍스트 쓰기를 대상으로 합니다. 줄바꿈·명시적 flush·Run 종료 때 전송하며 긴 줄은 서버의 16,000 UTF-16 단위 제한에 맞게 분할합니다. 원래 터미널 출력은 유지하고 전송본의 현재 API key는 가립니다. C 확장/하위 프로세스의 파일 디스크립터 직접 출력과 이미 다른 스트림에 연결된 logging 핸들러는 캡처하지 않습니다. 중첩 Run은 현재 컨텍스트에 해당하는 Run에 한 번 기록하고, 컨텍스트가 없는 다른 스레드의 출력은 가장 최근 활성 Run에 기록합니다.
 
-출력 전송과 주기 수집은 Run별 백그라운드 스레드에서 수행합니다. 로그 큐는 1,000개로 제한하며 초과한 새 로그는 버리고 `dropped_logs`에 집계합니다. 전송 실패한 로그/메트릭은 재전송하지 않으며 다음 주기의 측정/Heartbeat는 새 관측값입니다. 네트워크 지연 동안에도 학습 출력은 계속됩니다. `finish()`/`fail()`은 수집을 중지하고 남은 로그를 전송한 뒤 종료 API를 호출합니다. 따라서 종료 시에는 미전송 로그의 HTTP 처리 시간만큼 기다릴 수 있습니다. 종료 요청이 실패한 뒤에는 자동 수집이 정지된 상태를 유지하므로 서버 상태를 먼저 확인하세요.
+출력 전송과 주기 수집은 Run별 백그라운드 스레드에서 수행합니다. 로그 큐는 1,000개로 제한하며 초과한 새 로그는 버리고 `dropped_logs`에 집계합니다. 기본 설정에서는 전송 실패한 로그/메트릭을 재전송하지 않습니다. `max_retries`를 설정하면 같은 요청 ID와 원래 본문으로 제한 횟수만큼 재시도하며, 다음 주기의 측정/Heartbeat는 새 요청 ID를 가진 새 관측값입니다. 네트워크 지연 동안에도 학습 출력은 계속됩니다. `finish()`/`fail()`은 수집을 중지하고 남은 로그를 전송한 뒤 종료 API를 호출합니다. 따라서 종료 시에는 미전송 로그의 HTTP 처리 시간만큼 기다릴 수 있습니다. 종료 요청이 실패한 뒤에는 자동 수집이 정지된 상태를 유지하므로 서버 상태를 먼저 확인하세요.
 
 `run.close()` 또는 `client.close()`도 출력과 수집 스레드를 정리하지만 서버 실행을 종료 상태로 바꾸지는 않습니다. with 문이나 명시적 종료/close를 사용하세요. 프로세스 강제 종료 시 미전송 로그는 유실될 수 있습니다. Heartbeat 미수신은 조회 시각으로 확인할 수 있으며 자동 FAILED 전환/서버 타임아웃 판정은 제공하지 않습니다.
 
@@ -175,7 +175,26 @@ cd backend
 
 `AuthenticationError`(401), `PermissionDeniedError`(403), `NotFoundError`(404), `ConflictError`(409)는 `ApiError`를 상속하고 status_code/code/message/errors를 제공합니다. 연결/타임아웃은 `NetworkError`, 잘못된 응답은 `ProtocolError`, 클라이언트 입력 오류는 `ValidationError`입니다. 공통 기반은 `LabflowError`입니다. API key는 오류 메시지와 객체 repr에서 노출하지 않습니다.
 
-쓰기 요청을 자동 재시도하지 않습니다. 타임아웃은 서버가 기록하지 않았다는 뜻이 아니며 다시 전송하면 중복 Run/기록이 생길 수 있습니다. 완료/실패 재호출도 응답이 유실된 경우에는 결과를 먼저 확인하세요. HTTP 리다이렉트는 따라가지 않으므로 최종 URL을 설정해야 합니다. 환경 프록시는 자동 적용하지 않으며 HTTPS 인증서 검증은 기본 활성화입니다.
+SDK 0.3.0부터 모든 SDK 쓰기 요청에 UUID v4 `requestId`를 자동 생성해 `X-Request-ID` 헤더로 전송합니다. Run 생성, 파라미터, 메트릭, 로그, 텍스트, 시스템 지표, Heartbeat, 완료/실패가 대상입니다. 본문은 기존 형식을 유지합니다. 같은 내용의 로그를 새로 호출하면 새 ID가 생성되어 각각 기록됩니다.
+
+서버는 프로젝트별 요청 ID와 작업 종류·Run ID·검증된 본문의 SHA-256 해시를 비교합니다. 같은 ID와 같은 내용은 Run 생성 시 원래 runId/201/Location을, 나머지 쓰기는 204를 반환하며 중복 저장하지 않습니다. JSON 객체 키 순서는 비교 결과에 영향을 주지 않습니다. 같은 ID를 다른 본문/작업/Run에 재사용하면 `409 REQUEST_ID_CONFLICT`입니다. ID는 경로별이 아니라 **프로젝트 전체에서 유일**해야 합니다. 서로 다른 프로젝트는 같은 ID를 사용할 수 있고, 같은 프로젝트의 다른 API key로도 재시도할 수 있습니다.
+
+SDK의 `request_id` 인자로 직접 ID를 지정할 수도 있습니다. 영문/숫자/`-`/`_` 1~64자를 허용하며 대소문자를 구분합니다. 재전송은 원래 본문까지 같아야 합니다. 특히 `metric()`을 새로 호출해 수동 재전송할 때는 `elapsed_time`과 지정한 `recorded_at`도 동일하게 전달하세요. 프로세스 재시작을 넘는 수동 재시도를 원하면 ID와 원래 입력값을 호출자가 보관해야 합니다. 재시도에 새 ID를 만들면 새 기록으로 취급합니다.
+
+```python
+import labflow
+
+# 기본 0: 자동 재시도 없음. 업데이트된 서버에서 필요에 맞게 0~5로 설정합니다.
+with labflow.init("training", max_retries=2) as run:
+    run.metric({"loss": 0.125}, step=1)
+    run.log("학습 진행 중")
+```
+
+`max_retries`는 `Client(...)`에도 적용됩니다. 연결/타임아웃과 HTTP 502/503/504만 0.2초부터 지수적으로 간격을 늘려 재시도합니다. 자동 재시도는 ID와 직렬화한 본문을 한 번 만든 뒤 그대로 재사용하므로 자동 생성 경과 시간과 기록 시각도 변하지 않습니다. 4xx, HTTP 500, 리다이렉트, 잘못된 응답 본문은 자동 재시도하지 않습니다. 최종 `NetworkError`의 `request_id`와 `attempts`로 요청 ID와 시도 횟수를 확인할 수 있습니다. 이 옵션은 자동 출력 캡처와 시스템 지표·Heartbeat 전송에도 적용됩니다.
+
+서버는 성공 결과와 실제 기록을 같은 DB 트랜잭션으로 커밋하고, 실패하면 요청 ID도 소비하지 않습니다. 성공한 요청은 Run 종료 후에도 같은 ID/내용으로 재전송할 수 있지만, 인증·현재 접근 권한 검사는 매번 수행합니다. 중복 판정 기록은 프로젝트 삭제 시 함께 삭제하며 별도 TTL은 없습니다. 오프라인 전송 큐나 프로세스 간 ID 보관은 제공하지 않습니다.
+
+배포 순서는 [요청 ID DDL](../backend/database/sdk-requests.sql) 적용 → 서버 업데이트 → SDK 업데이트입니다. 기존 DB에서 한 번 적용하며 새 DB는 갱신된 `runs.sql`을 사용합니다. 이전 서버는 헤더를 무시하므로 업데이트된 서버에서만 중복 제거가 보장됩니다. 헤더 없는 이전 클라이언트는 기존 동작을 유지합니다. HTTP 리다이렉트는 따라가지 않으므로 최종 URL을 설정해야 합니다. 환경 프록시는 자동 적용하지 않으며 HTTPS 인증서 검증은 기본 활성화입니다.
 
 수동 API는 동기식입니다. 자동 수집에만 백그라운드 큐를 사용하며, 오프라인 영속 저장과 파일/데이터셋 업로드는 제공하지 않습니다.
 
@@ -198,8 +217,8 @@ cd backend
 .\gradlew.bat spotlessCheck test --tests com.dju.labflow.PythonSdkIntegrationTests --rerun-tasks --no-daemon
 ```
 
-`LABFLOW_PYTHON`은 위에서 SDK를 설치한 Python 실행 파일의 절대 경로로 지정하세요. 이 테스트는 `test` 프로필로 임의 포트의 실제 Spring Boot HTTP 서버와 H2를 실행하고, 임시 ACTIVE 사용자·PRIVATE 프로젝트·키를 생성합니다. Python의 연결 테스트 5개를 실행한 뒤 Java 저장소에서 환경 정보·자동 stdout/stderr·시스템 지표·주기 Heartbeat와 파라미터·메트릭·로그·텍스트·종료 상태의 저장 결과를 검증하고 임시 데이터를 삭제합니다. 실 DB와 Gmail 설정은 사용하지 않습니다.
+`LABFLOW_PYTHON`은 위에서 SDK를 설치한 Python 실행 파일의 절대 경로로 지정하세요. 이 테스트는 `test` 프로필로 임의 포트의 실제 Spring Boot HTTP 서버와 H2를 실행하고, 임시 ACTIVE 사용자·PRIVATE 프로젝트·키를 생성합니다. Python의 연결 테스트 6개를 실행한 뒤 Java 저장소에서 환경 정보·자동 stdout/stderr·시스템 지표·주기 Heartbeat와 파라미터·메트릭·로그·텍스트·종료 상태의 저장 결과와 서버 커밋 후 응답 유실 시 Run/기록이 한 번만 저장되는 것을 검증하고 임시 데이터를 삭제합니다. 실 DB와 Gmail 설정은 사용하지 않습니다.
 
 NVIDIA GPU가 있는 테스트 머신에서는 `$env:LABFLOW_EXPECT_GPU = 'true'`를 추가하면 실제 GPU 사용률·메모리의 DB 저장도 필수로 검증합니다. GPU 없는 머신에서는 이 변수를 설정하지 않습니다.
 
-일반 `pytest`에서는 연결 테스트 5개를 건너뛰고, 일반 백엔드 테스트에서도 `LABFLOW_PYTHON`을 지정하지 않으면 이 테스트를 건너뜁니다. 직접 연결 테스트를 실행하려면 폐기 가능한 테스트 서버의 `LABFLOW_TEST_BACKEND_URL`, 그 서버의 두 다른 프로젝트에 발급한 `LABFLOW_TEST_API_KEY`, `LABFLOW_TEST_OTHER_API_KEY`를 모두 지정하고 `python -m pytest -q tests/integration/test_backend.py`를 실행합니다. 직접 실행한 Python 테스트는 서버에 만든 실험을 남깁니다. 이 테스트 전용 변수는 SDK의 일반 환경변수와 분리되어 있습니다.
+일반 `pytest`에서는 연결 테스트 6개를 건너뛰고, 일반 백엔드 테스트에서도 `LABFLOW_PYTHON`을 지정하지 않으면 이 테스트를 건너뜁니다. 직접 연결 테스트를 실행하려면 폐기 가능한 테스트 서버의 `LABFLOW_TEST_BACKEND_URL`, 그 서버의 두 다른 프로젝트에 발급한 `LABFLOW_TEST_API_KEY`, `LABFLOW_TEST_OTHER_API_KEY`를 모두 지정하고 `python -m pytest -q tests/integration/test_backend.py`를 실행합니다. 직접 실행한 Python 테스트는 서버에 만든 실험을 남깁니다. 이 테스트 전용 변수는 SDK의 일반 환경변수와 분리되어 있습니다.

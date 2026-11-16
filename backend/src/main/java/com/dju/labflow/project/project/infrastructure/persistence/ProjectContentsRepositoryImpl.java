@@ -23,6 +23,7 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
         Objects.requireNonNull(projectId, "Project ID must not be null");
         entityManager.flush();
         String runs = "select id from run_entity where project_id = :projectId";
+        execute("delete from sdk_request_entity where project_id = :projectId", projectId);
         execute(
                 "delete from run_system_metric_gpu where system_metric_id in (select id from run_system_metric_entity where run_id in ("
                         + runs
