@@ -273,8 +273,13 @@ API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습
 - `run/log`: 메시지·레벨·출처(`USER`, `STDOUT`, `STDERR`, `SDK`)를 가진 실행 로그
 - `run/systemmetric`: CPU/GPU 사용률(0~100), RAM/GPU 메모리(바이트)의 스냅샷. 미수집 수치는 null, GPU 목록은 비어 있을 수 있습니다.
 - `run/text`: `text()`용 이름·본문·선택 step을 가진 실험 텍스트 데이터
+- `run/artifact`: 결과 파일의 이름·종류·저장 위치·예약/실제 크기·선택 SHA-256과 업로드 수명주기. `RunArtifactCommand`, 도메인, Mapper와 JPA 저장소를 분리합니다.
 
 각 하위 패키지는 `domain`, `domain/repository`, `application`, `infrastructure/persistence`를 사용합니다. 저장 모델은 `AssignedIdEntity`를 사용하며 도메인의 `create/restore`, Mapper, JPA 저장소와 저장소 구현을 구분합니다. 기록은 추가 전용이며 일반 조회는 최대 1,000개로 제한합니다. 기록 시각/ID 순으로 첫 limit개를 반환하며 커서 페이지네이션은 아직 제공하지 않습니다.
+
+Artifact는 생성 시 `UPLOADING`이며 예약 크기와 실제 크기가 일치하고 업로드 기한 안에 검증되어야 `READY`로 전환합니다. 같은 크기/체크섬의 완료 재요청은 원래 업로드 시각을 유지하고, 다른 결과로 덮어쓰기는 거부합니다. 실패 시 `FAILED`, 삭제 요청 시 `DELETING`으로 전환합니다. 일반 파일 목록에는 `findReadyByRunId()`를 사용합니다. 전체 상태 조회는 `findByRunId()`이며 두 조회 모두 생성 시각/ID 오름차순, 최대 1,000개입니다. `save()`는 신규 INSERT, `update()`는 도메인 조회 버전과 JPA `@Version`을 검사하는 상태 변경입니다.
+
+같은 Run의 `clientRequestId`와 저장 위치 `(bucket, objectKey)`는 각각 유니크합니다. 파일명은 중복될 수 있습니다. 재시도 조회는 `findByRunIdAndClientRequestId()`를 제공하지만, 예약 요청 내용 비교와 동시 INSERT 충돌 처리는 향후 업로드 서비스에서 수행해야 합니다. 이 모듈은 도메인/영속성 기반이며 HTTP API, 스토리지 어댑터, 파일 검증 작업, 용량 정책/사용량 예약, 정리 작업은 아직 연결하지 않았습니다. 최대 크기는 도메인에 고정하지 않고 업로드 서비스의 설정 정책에서 검사해야 합니다. 프로젝트 삭제에는 Artifact 메타데이터 삭제를 포함하며, 실제 스토리지 연동 시 객체 삭제 재시도 작업을 같은 트랜잭션에서 기록하는 처리를 추가해야 합니다.
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 

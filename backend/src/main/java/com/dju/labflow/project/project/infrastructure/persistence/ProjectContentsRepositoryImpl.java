@@ -34,6 +34,7 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
                     "run_metric_entity",
                     "run_log_entity",
                     "run_text_entity",
+                    "run_artifact_entity",
                     "run_system_metric_entity"
                 }) execute("delete from " + table + " where run_id in (" + runs + ")", projectId);
         execute("delete from run_metadata where run_id in (" + runs + ")", projectId);

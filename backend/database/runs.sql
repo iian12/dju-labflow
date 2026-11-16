@@ -83,3 +83,29 @@ CREATE TABLE IF NOT EXISTS run_system_metric_gpu (
     CONSTRAINT uk_system_metric_gpu UNIQUE (system_metric_id, gpu_index),
     CONSTRAINT fk_gpu_system_metric FOREIGN KEY (system_metric_id) REFERENCES run_system_metric_entity(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 파일 본문은 외부 저장소에 보관하고 예약 및 검증된 메타데이터만 저장한다.
+CREATE TABLE IF NOT EXISTS run_artifact_entity (
+    id BIGINT NOT NULL PRIMARY KEY,
+    version BIGINT NOT NULL,
+    run_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    kind ENUM('MODEL','CHECKPOINT','REPORT','PREDICTION','OTHER') NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
+    expected_size_bytes BIGINT NOT NULL,
+    size_bytes BIGINT,
+    sha256 VARCHAR(64),
+    bucket VARCHAR(255) NOT NULL,
+    object_key VARCHAR(512) NOT NULL,
+    status ENUM('UPLOADING','READY','FAILED','DELETING') NOT NULL,
+    step BIGINT,
+    client_request_id VARCHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    upload_expires_at DATETIME(6) NOT NULL,
+    uploaded_at DATETIME(6),
+    INDEX idx_run_artifact_time (run_id, created_at, id),
+    INDEX idx_run_artifact_status_time (run_id, status, created_at, id),
+    INDEX idx_run_artifact_expiry (status, upload_expires_at, id),
+    CONSTRAINT uk_run_artifact_request UNIQUE (run_id, client_request_id),
+    CONSTRAINT uk_run_artifact_object UNIQUE (bucket, object_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

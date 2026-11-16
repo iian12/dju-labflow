@@ -67,6 +67,7 @@ class RunSchemaTests {
                             "RUN_METRIC_ENTITY",
                             "RUN_LOG_ENTITY",
                             "RUN_TEXT_ENTITY",
+                            "RUN_ARTIFACT_ENTITY",
                             "RUN_SYSTEM_METRIC_ENTITY",
                             "RUN_SYSTEM_METRIC_GPU");
             try (var statement = connection.createStatement()) {
@@ -77,6 +78,41 @@ class RunSchemaTests {
                                         statement.executeUpdate(
                                                 "insert into run_parameter_entity(id,run_id,parameter_key,parameter_value,created_at) values(2,1,'optimizer','sgd',current_timestamp)"))
                         .isInstanceOf(SQLException.class);
+            }
+        }
+    }
+
+    @Test
+    void deploymentArtifactDdlEnforcesRequestAndStorageIdentityWithoutUniqueFileNames()
+            throws Exception {
+        try (var connection =
+                DriverManager.getConnection("jdbc:h2:mem:artifact-ddl;MODE=MariaDB", "sa", "")) {
+            ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
+            try (var insert =
+                    connection.prepareStatement(
+                            "insert into run_artifact_entity(id,version,run_id,name,kind,content_type,"
+                                    + "expected_size_bytes,bucket,object_key,status,client_request_id,created_at,upload_expires_at) "
+                                    + "values(?,0,?,'model.pt','MODEL','application/octet-stream',10,'files',?,"
+                                    + "'UPLOADING',?,current_timestamp,dateadd('HOUR',1,current_timestamp))")) {
+                insert.setLong(1, 1L);
+                insert.setLong(2, 1L);
+                insert.setString(3, "object-1");
+                insert.setString(4, "request-1");
+                insert.executeUpdate();
+
+                insert.setLong(1, 2L);
+                insert.setString(3, "object-2");
+                assertThatThrownBy(insert::executeUpdate).isInstanceOf(SQLException.class);
+
+                insert.setString(4, "request-2");
+                assertThat(insert.executeUpdate()).isEqualTo(1);
+
+                insert.setLong(1, 3L);
+                insert.setLong(2, 2L);
+                assertThatThrownBy(insert::executeUpdate).isInstanceOf(SQLException.class);
+
+                insert.setString(3, "object-3");
+                assertThat(insert.executeUpdate()).isEqualTo(1);
             }
         }
     }
