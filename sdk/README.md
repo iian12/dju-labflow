@@ -1,6 +1,6 @@
 # LabFlow Python SDK
 
-Python 3.10 이상에서 동작하는 동기식 최소 SDK입니다. 현재 백엔드의 프로젝트 API key 전용 Run API를 사용합니다.
+Python 3.10 이상에서 동작하는 Python SDK입니다. 수동 기록은 동기식이며 자동 수집은 백그라운드에서 동작합니다. 현재 백엔드의 프로젝트 API key 전용 Run API를 사용합니다.
 
 ## 설치와 설정
 
@@ -83,6 +83,45 @@ with Client() as client:
 
 Client가 만든 Run은 Client의 연결을 공유하며 개별 Run 종료가 Client를 닫지 않습니다. Run의 `state`는 로컬에서 성공 응답을 확인한 상태이며 서버의 최신 상태는 `get_run()`으로 확인합니다.
 
+## 환경 정보·출력·시스템 지표·Heartbeat 자동 수집
+
+`labflow.init()`과 `Client.start_run()`은 기본으로 다음 항목을 수집합니다.
+
+| 항목 | 기본 동작 |
+| --- | --- |
+| 환경 정보 | 생성 요청의 metadata에 OS/OS 버전, 아키텍처, Python 버전/구현, SDK 버전 기록 |
+| stdout/stderr | 터미널에 그대로 출력하면서 로그 API로 전송. 출처는 STDOUT/STDERR, 레벨은 INFO/ERROR |
+| System Metrics | 시작 후 CPU 사용률(0~100), 호스트 RAM 사용량/전체(바이트), 이후 10초 간격 |
+| Heartbeat | 시작 후 서버에 생존 신호 전송, 이후 30초 간격. 조회 응답의 `lastHeartbeatAt`으로 확인 |
+
+환경 정보 키는 `system.os`, `system.os_version`, `system.architecture`, `system.python_version`, `system.python_implementation`, `system.sdk_version`입니다. 사용자 metadata와 합치며 같은 키는 사용자 값이 우선합니다. 합계 100개 제한을 적용합니다. 환경변수 전체, API key, 설치 패키지 목록은 수집하지 않습니다.
+
+CPU/RAM 수집용 `psutil`은 기본 의존성입니다. NVIDIA GPU 사용률·메모리도 수집하려면 `python -m pip install -e './sdk[system]'`으로 NVML 바인딩을 추가합니다. GPU/드라이버가 없거나 권한이 없는 환경에서는 CPU/RAM 수집을 계속하고 GPU 목록은 비워 둡니다. 장치가 일부 측정값을 지원하지 않으면 해당 값만 생략합니다.
+
+```python
+import labflow
+
+with labflow.init(
+    "automatic-tracking",
+    system_metrics_interval=5.0,
+    heartbeat_interval=15.0,
+) as run:
+    print("이 출력은 STDOUT 로그에도 저장됩니다")
+    # 학습 코드...
+    labflow.heartbeat()  # 자동 주기와 별도로 즉시 전송할 수도 있습니다.
+    print(run.telemetry_status)  # errors, dropped_logs, last_error
+```
+
+`Client(...)`에도 같은 옵션을 전달할 수 있습니다. 기능별로 끄려면 `collect_environment=False`, `capture_output=False`, `system_metrics_interval=None`, `heartbeat_interval=None`을 지정합니다. 간격은 양의 유한한 초 단위 값입니다. 자동 수집 실패는 학습 예외를 발생시키지 않으며 최초 실패 시 경고하고 `run.telemetry_status`에 누적 오류 수와 최근 오류 타입을 제공합니다. 수동 `heartbeat()`는 다른 수동 API처럼 오류를 호출자에게 전달합니다.
+
+출력 캡처는 Python의 `sys.stdout`/`sys.stderr` 텍스트 쓰기를 대상으로 합니다. 줄바꿈·명시적 flush·Run 종료 때 전송하며 긴 줄은 서버의 16,000 UTF-16 단위 제한에 맞게 분할합니다. 원래 터미널 출력은 유지하고 전송본의 현재 API key는 가립니다. C 확장/하위 프로세스의 파일 디스크립터 직접 출력과 이미 다른 스트림에 연결된 logging 핸들러는 캡처하지 않습니다. 중첩 Run은 현재 컨텍스트에 해당하는 Run에 한 번 기록하고, 컨텍스트가 없는 다른 스레드의 출력은 가장 최근 활성 Run에 기록합니다.
+
+출력 전송과 주기 수집은 Run별 백그라운드 스레드에서 수행합니다. 로그 큐는 1,000개로 제한하며 초과한 새 로그는 버리고 `dropped_logs`에 집계합니다. 전송 실패한 로그/메트릭은 재전송하지 않으며 다음 주기의 측정/Heartbeat는 새 관측값입니다. 네트워크 지연 동안에도 학습 출력은 계속됩니다. `finish()`/`fail()`은 수집을 중지하고 남은 로그를 전송한 뒤 종료 API를 호출합니다. 따라서 종료 시에는 미전송 로그의 HTTP 처리 시간만큼 기다릴 수 있습니다. 종료 요청이 실패한 뒤에는 자동 수집이 정지된 상태를 유지하므로 서버 상태를 먼저 확인하세요.
+
+`run.close()` 또는 `client.close()`도 출력과 수집 스레드를 정리하지만 서버 실행을 종료 상태로 바꾸지는 않습니다. with 문이나 명시적 종료/close를 사용하세요. 프로세스 강제 종료 시 미전송 로그는 유실될 수 있습니다. Heartbeat 미수신은 조회 시각으로 확인할 수 있으며 자동 FAILED 전환/서버 타임아웃 판정은 제공하지 않습니다.
+
+서버에는 `POST /api/v1/sdk/runs/{runId}/heartbeat`가 필요합니다. 기존 DB를 사용하는 서버는 배포 전에 [Heartbeat DDL](../backend/database/run-heartbeat.sql)을 한 번 적용해야 합니다. SDK/웹 상세 조회에 `lastHeartbeatAt`이 추가되며 미수신 실행은 null입니다.
+
 ## 실제 모델 학습으로 사용해 보기
 
 `examples/train_digits.py`는 scikit-learn의 [digits 데이터셋](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_digits.html)으로 [SGDClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.SGDClassifier.html)를 실제 학습합니다. 8×8 손글씨 숫자를 0~9로 분류하는 CPU 예제이며 데이터셋은 패키지에 포함되어 있습니다. GPU나 별도의 데이터 다운로드가 필요하지 않습니다.
@@ -138,7 +177,7 @@ cd backend
 
 쓰기 요청을 자동 재시도하지 않습니다. 타임아웃은 서버가 기록하지 않았다는 뜻이 아니며 다시 전송하면 중복 Run/기록이 생길 수 있습니다. 완료/실패 재호출도 응답이 유실된 경우에는 결과를 먼저 확인하세요. HTTP 리다이렉트는 따라가지 않으므로 최종 URL을 설정해야 합니다. 환경 프록시는 자동 적용하지 않으며 HTTPS 인증서 검증은 기본 활성화입니다.
 
-배치/비동기 큐, 자동 stdout/stderr 캡처, CPU/GPU 자동 수집, 오프라인 저장 및 파일/데이터셋은 이번 범위에 포함하지 않습니다. `system` 추가 의존성은 후속 수집 기능을 위한 선택 설치 항목입니다.
+수동 API는 동기식입니다. 자동 수집에만 백그라운드 큐를 사용하며, 오프라인 영속 저장과 파일/데이터셋 업로드는 제공하지 않습니다.
 
 ## 개발과 검증
 
@@ -159,6 +198,8 @@ cd backend
 .\gradlew.bat spotlessCheck test --tests com.dju.labflow.PythonSdkIntegrationTests --rerun-tasks --no-daemon
 ```
 
-`LABFLOW_PYTHON`은 위에서 SDK를 설치한 Python 실행 파일의 절대 경로로 지정하세요. 이 테스트는 `test` 프로필로 임의 포트의 실제 Spring Boot HTTP 서버와 H2를 실행하고, 임시 ACTIVE 사용자·PRIVATE 프로젝트·키를 생성합니다. Python의 연결 테스트 4개를 실행한 뒤 Java 저장소에서 파라미터·메트릭·로그·텍스트·종료 상태의 저장 결과를 검증하고 임시 데이터를 삭제합니다. 실 DB와 Gmail 설정은 사용하지 않습니다.
+`LABFLOW_PYTHON`은 위에서 SDK를 설치한 Python 실행 파일의 절대 경로로 지정하세요. 이 테스트는 `test` 프로필로 임의 포트의 실제 Spring Boot HTTP 서버와 H2를 실행하고, 임시 ACTIVE 사용자·PRIVATE 프로젝트·키를 생성합니다. Python의 연결 테스트 5개를 실행한 뒤 Java 저장소에서 환경 정보·자동 stdout/stderr·시스템 지표·주기 Heartbeat와 파라미터·메트릭·로그·텍스트·종료 상태의 저장 결과를 검증하고 임시 데이터를 삭제합니다. 실 DB와 Gmail 설정은 사용하지 않습니다.
 
-일반 `pytest`에서는 연결 테스트 4개를 건너뛰고, 일반 백엔드 테스트에서도 `LABFLOW_PYTHON`을 지정하지 않으면 이 테스트를 건너뜁니다. 직접 연결 테스트를 실행하려면 폐기 가능한 테스트 서버의 `LABFLOW_TEST_BACKEND_URL`, 그 서버의 두 다른 프로젝트에 발급한 `LABFLOW_TEST_API_KEY`, `LABFLOW_TEST_OTHER_API_KEY`를 모두 지정하고 `python -m pytest -q tests/integration/test_backend.py`를 실행합니다. 직접 실행한 Python 테스트는 서버에 만든 실험을 남깁니다. 이 테스트 전용 변수는 SDK의 일반 환경변수와 분리되어 있습니다.
+NVIDIA GPU가 있는 테스트 머신에서는 `$env:LABFLOW_EXPECT_GPU = 'true'`를 추가하면 실제 GPU 사용률·메모리의 DB 저장도 필수로 검증합니다. GPU 없는 머신에서는 이 변수를 설정하지 않습니다.
+
+일반 `pytest`에서는 연결 테스트 5개를 건너뛰고, 일반 백엔드 테스트에서도 `LABFLOW_PYTHON`을 지정하지 않으면 이 테스트를 건너뜁니다. 직접 연결 테스트를 실행하려면 폐기 가능한 테스트 서버의 `LABFLOW_TEST_BACKEND_URL`, 그 서버의 두 다른 프로젝트에 발급한 `LABFLOW_TEST_API_KEY`, `LABFLOW_TEST_OTHER_API_KEY`를 모두 지정하고 `python -m pytest -q tests/integration/test_backend.py`를 실행합니다. 직접 실행한 Python 테스트는 서버에 만든 실험을 남깁니다. 이 테스트 전용 변수는 SDK의 일반 환경변수와 분리되어 있습니다.

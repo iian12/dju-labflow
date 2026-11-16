@@ -42,6 +42,10 @@ class Client:
         base_url: str | None = None,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
+        collect_environment: bool = True,
+        capture_output: bool = True,
+        system_metrics_interval: float | None = 10.0,
+        heartbeat_interval: float | None = 30.0,
     ) -> None:
         key = api_key if api_key is not None else os.getenv("LABFLOW_API_KEY")
         if not isinstance(key, str) or not key or any(not 33 <= ord(c) <= 126 for c in key):
@@ -73,6 +77,22 @@ class Client:
                 "Use an absolute HTTP(S) backend URL and a positive timeout"
             ) from None
         self._api_key = key
+        if type(collect_environment) is not bool or type(capture_output) is not bool:
+            raise ConfigurationError("collect_environment and capture_output must be booleans")
+        for interval in (system_metrics_interval, heartbeat_interval):
+            if interval is not None:
+                try:
+                    if validate.number(interval, "Collection interval", nonnegative=True) == 0:
+                        raise ValueError
+                except (ValidationError, ValueError):
+                    raise ConfigurationError(
+                        "Collection intervals must be positive or None"
+                    ) from None
+        self._collect_environment = collect_environment
+        self._capture_output = capture_output
+        self._system_metrics_interval = system_metrics_interval
+        self._heartbeat_interval = heartbeat_interval
+        self._runs: set[Run] = set()
         self._http = httpx.Client(
             base_url=url.rstrip("/") + "/",
             headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
@@ -99,14 +119,20 @@ class Client:
 
     def close(self) -> None:
         """Release HTTP resources; run completion is an explicit operation."""
+        for run in tuple(self._runs):
+            run.close()
         self._http.close()
 
     def start_run(self, name: str, *, metadata: Mapping[str, Scalar] | None = None) -> "Run":
+        from ._telemetry import environment
         from .run import Run
 
         body = {"name": validate.text(name, "Run name", 100)}
+        collected = environment() if self._collect_environment else {}
         if metadata is not None:
-            body["metadata"] = validate.string_map(metadata, "Metadata", empty=True)
+            collected.update(validate.string_map(metadata, "Metadata", empty=True))
+        if collected or metadata is not None:
+            body["metadata"] = validate.string_map(collected, "Metadata", empty=True)
         data = self._request("POST", _ROOT, body=body, expected=201)
         try:
             run_id = validate.integer(data["runId"], "Run ID", minimum=1)
@@ -114,7 +140,12 @@ class Client:
             raise ProtocolError(
                 "Run creation response must contain a positive 64-bit runId"
             ) from None
-        return Run(self, run_id)
+        run = Run(self, run_id)
+        self._runs.add(run)
+        run._start_telemetry(
+            self._capture_output, self._system_metrics_interval, self._heartbeat_interval
+        )
+        return run
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         run_id = validate.integer(run_id, "Run ID", minimum=1)

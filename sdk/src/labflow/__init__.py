@@ -1,4 +1,4 @@
-"""Minimal synchronous LabFlow experiment tracking SDK."""
+"""LabFlow experiment tracking with explicit records and automatic telemetry."""
 
 from collections.abc import Mapping
 from datetime import datetime
@@ -6,6 +6,7 @@ from numbers import Real
 
 from . import _context
 from ._validation import Scalar
+from ._version import __version__ as __version__
 from .client import Client
 from .errors import (
     ApiError,
@@ -22,7 +23,6 @@ from .errors import (
 )
 from .run import Run
 
-__version__ = "0.1.1"
 __all__ = [
     "Client",
     "Run",
@@ -33,6 +33,7 @@ __all__ = [
     "text",
     "finish",
     "fail",
+    "heartbeat",
     "current_run",
     "LabflowError",
     "ApiError",
@@ -62,6 +63,10 @@ def init(
     base_url: str | None = None,
     metadata: Mapping[str, Scalar] | None = None,
     timeout: float = 10.0,
+    collect_environment: bool = True,
+    capture_output: bool = True,
+    system_metrics_interval: float | None = 10.0,
+    heartbeat_interval: float | None = 30.0,
 ) -> Run:
     previous = _context.current.get()
     if (
@@ -71,7 +76,15 @@ def init(
         and not previous._client.closed
     ):
         raise RunStateError("An active run already exists; finish or fail it first")
-    client = Client(api_key=api_key, base_url=base_url, timeout=timeout)
+    client = Client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        collect_environment=collect_environment,
+        capture_output=capture_output,
+        system_metrics_interval=system_metrics_interval,
+        heartbeat_interval=heartbeat_interval,
+    )
     try:
         run = client.start_run(name, metadata=metadata)
     except BaseException:
@@ -117,3 +130,7 @@ def finish() -> None:
 
 def fail(error: str) -> None:
     current_run().fail(error)
+
+
+def heartbeat() -> None:
+    current_run().heartbeat()

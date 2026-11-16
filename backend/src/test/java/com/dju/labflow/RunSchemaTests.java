@@ -16,6 +16,30 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 /** 배포 DDL의 기본 문법과 키 제약을 격리된 H2 MariaDB 모드에서 검사한다. */
 class RunSchemaTests {
     @Test
+    void heartbeatMigrationPreservesExistingRuns() throws Exception {
+        try (var connection =
+                DriverManager.getConnection("jdbc:h2:mem:heartbeat-ddl;MODE=MariaDB", "sa", "")) {
+            ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
+            try (var statement = connection.createStatement()) {
+                statement.execute("alter table run_entity drop column last_heartbeat_at");
+                statement.executeUpdate(
+                        "insert into run_entity(id,version,project_id,created_by,name,status,started_at) "
+                                + "values(1,0,1,1,'existing','RUNNING',current_timestamp)");
+            }
+            ScriptUtils.executeSqlScript(
+                    connection, new FileSystemResource("database/run-heartbeat.sql"));
+            try (var statement = connection.createStatement();
+                    var result =
+                            statement.executeQuery(
+                                    "select name,last_heartbeat_at from run_entity where id=1")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("name")).isEqualTo("existing");
+                assertThat(result.getTimestamp("last_heartbeat_at")).isNull();
+            }
+        }
+    }
+
+    @Test
     void mariaDbMappingDoesNotShrinkTextAndLogColumnsToTinytext() {
         var registry =
                 new StandardServiceRegistryBuilder()

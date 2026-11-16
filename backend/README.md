@@ -283,9 +283,11 @@ Artifact는 생성 시 `UPLOADING`이며 예약 크기와 실제 크기가 일�
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
+`POST /api/v1/sdk/runs/{runId}/heartbeat`는 본문 없이 실행의 생존 시각을 서버 시계로 갱신합니다. 기존 프로젝트 접근 정책과 실행 잠금을 적용하며 종료된 실행에는 409를 반환합니다. SDK/웹 상세 조회의 `lastHeartbeatAt`은 마지막 수신 시각이며 미수신 실행은 null입니다. 시간 역행으로 기존 생존 시각을 덮어쓰지 않으며, 신호 중단에 따른 자동 실패 전환은 아직 수행하지 않습니다. 기존 MariaDB는 배포 전에 `database/run-heartbeat.sql`을 한 번 적용하고 새 DB는 갱신된 `database/runs.sql`을 사용합니다.
+
 기록 추가와 종료는 같은 실행 행을 서비스 트랜잭션에서 잠가 직렬화합니다. 저장소의 잠금 조회는 활성 트랜잭션을 요구합니다. 실행 상태 갱신은 도메인의 조회 버전도 검사해 오래된 객체가 종료 상태를 덮어쓰지 못하게 합니다. 기록 배치는 한 트랜잭션이며 일부 값이 잘못되면 전체가 롤백됩니다. 메트릭·로그·텍스트·시스템 지표의 재전송은 새 기록을 추가하므로 자동 재시도/중복 제거는 추후 SDK 계약에서 정해야 합니다.
 
-요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK는 `sdk/src/labflow`에 구현되어 있으며 API key 설정, Run 생성, `params/metric/log/text`, 완료·실패 및 상태 조회를 제공합니다. 설치·사용법과 실제 HTTP 연결 테스트는 [SDK README](../sdk/README.md)를 참고하세요. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
+요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK는 `sdk/src/labflow`에 구현되어 있으며 API key 설정, Run 생성, `params/metric/log/text`, 완료·실패 및 상태 조회를 제공합니다. SDK 0.2.0부터 환경 메타데이터, stdout/stderr, CPU/RAM·선택 NVIDIA GPU 지표와 주기 Heartbeat를 자동 수집합니다. 설치·사용법과 실제 HTTP 연결 테스트는 [SDK README](../sdk/README.md)를 참고하세요. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
 
 기존 DB에는 `database/runs.sql`을 먼저 적용해야 합니다. 이 DDL은 자동 실행되지 않으며 테스트에서는 H2가 새 테이블을 생성합니다. 실제 MariaDB 마이그레이션 실행은 별도 배포 단계에서 수행합니다.
 

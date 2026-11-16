@@ -1,6 +1,8 @@
 """Real HTTP tests; opt in only against disposable backend fixtures."""
 
 import os
+import sys
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -25,7 +27,13 @@ def settings():
 @pytest.fixture
 def client(settings):
     url, key, _ = settings
-    with Client(api_key=key, base_url=url) as connection:
+    with Client(
+        api_key=key,
+        base_url=url,
+        capture_output=False,
+        system_metrics_interval=None,
+        heartbeat_interval=None,
+    ) as connection:
         yield connection
 
 
@@ -49,7 +57,8 @@ def test_records_and_automatic_completion(settings, client):
     assert run.state == "COMPLETED"
     status = client.get_run(run.id)
     assert status["status"] == "COMPLETED"
-    assert status["metadata"] == {"framework": "python", "seed": "42"}
+    assert status["metadata"].items() >= {"framework": "python", "seed": "42"}.items()
+    assert status["metadata"]["system.sdk_version"] == labflow.__version__
     assert status["endedAt"] is not None
     assert status["error"] is None
 
@@ -95,3 +104,40 @@ def test_real_api_key_authentication_and_project_isolation(settings, client):
         with pytest.raises(NotFoundError) as caught:
             client.get_run(1)
         assert caught.value.status_code == 404
+
+
+def test_automatic_telemetry(settings, client):
+    url, key, other_key = settings
+    with labflow.init(
+        "python-sdk-telemetry",
+        api_key=key,
+        base_url=url,
+        system_metrics_interval=0.05,
+        heartbeat_interval=0.05,
+    ) as run:
+        print("자동 stdout 🐈")
+        sys.stderr.write("자동 stderr\n")
+        sys.stdout.write("partial output")
+        deadline = time.monotonic() + 10
+        first = None
+        while time.monotonic() < deadline:
+            current = client.get_run(run.id)["lastHeartbeatAt"]
+            if first is not None and current != first:
+                break
+            if current is not None:
+                first = current
+            time.sleep(0.05)
+        else:
+            pytest.fail("Periodic heartbeats were not received")
+        assert run.telemetry_status == {"errors": 0, "dropped_logs": 0, "last_error": None}
+        with Client(api_key=other_key, base_url=url) as other:
+            with pytest.raises(PermissionDeniedError):
+                other._request("POST", f"{run._path}/heartbeat")
+    status = client.get_run(run.id)
+    assert status["status"] == "COMPLETED"
+    assert status["lastHeartbeatAt"] is not None
+    with pytest.raises(ConflictError):
+        client._request("POST", f"{run._path}/heartbeat")
+    time.sleep(0.1)
+    assert client.get_run(run.id)["lastHeartbeatAt"] == status["lastHeartbeatAt"]
+    assert run.telemetry_status["errors"] == 0

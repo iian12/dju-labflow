@@ -587,6 +587,7 @@ class SdkRunHttpTests {
                                             BASE + "/{runId}/logs",
                                             BASE + "/{runId}/texts",
                                             BASE + "/{runId}/system-metrics",
+                                            BASE + "/{runId}/heartbeat",
                                             BASE + "/{runId}/complete",
                                             BASE + "/{runId}/fail")) {
                 String operation = "$.paths['" + route + "']." + verb;
@@ -624,6 +625,7 @@ class SdkRunHttpTests {
                 new Write("/logs", "{\"message\":\"x\",\"level\":\"INFO\",\"source\":\"USER\"}"),
                 new Write("/texts", "{\"key\":\"prediction\",\"text\":\"cat\"}"),
                 new Write("/system-metrics", "{\"system\":{\"cpuUtilization\":10}}"),
+                new Write("/heartbeat", null),
                 new Write("/complete", null),
                 new Write("/fail", "{\"error\":\"failure\"}"));
     }

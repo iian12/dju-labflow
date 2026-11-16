@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 import lombok.*;
 
-/** 실행 저장 모델. 소속/시작 시각은 불변이며 종료 상태만 갱신한다. */
+/** 실행 저장 모델. 소속/시작 시각은 불변이며 종료 상태와 생존 시각을 갱신한다. */
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -42,6 +42,8 @@ public class RunEntity extends AssignedIdEntity {
 
     private Instant endedAt;
 
+    private Instant lastHeartbeatAt;
+
     @Column(length = 4000)
     private String error;
 
@@ -55,7 +57,8 @@ public class RunEntity extends AssignedIdEntity {
             RunStatus status,
             Instant startedAt,
             Instant endedAt,
-            String error) {
+            String error,
+            Instant lastHeartbeatAt) {
         this.id = id;
         this.projectId = projectId;
         this.createdBy = createdBy;
@@ -65,11 +68,16 @@ public class RunEntity extends AssignedIdEntity {
         this.startedAt = startedAt;
         this.endedAt = endedAt;
         this.error = error;
+        this.lastHeartbeatAt = lastHeartbeatAt;
     }
 
     public void update(RunStatus status, Instant endedAt, String error) {
         this.status = status;
         this.endedAt = endedAt;
         this.error = error;
+    }
+
+    public void updateHeartbeat(Instant lastHeartbeatAt) {
+        this.lastHeartbeatAt = lastHeartbeatAt;
     }
 }

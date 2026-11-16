@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS run_entity (
     status ENUM('RUNNING','COMPLETED','FAILED') NOT NULL,
     started_at DATETIME(6) NOT NULL,
     ended_at DATETIME(6),
+    last_heartbeat_at DATETIME(6),
     error VARCHAR(4000),
     INDEX idx_run_project_time (project_id, started_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

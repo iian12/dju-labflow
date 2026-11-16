@@ -23,6 +23,21 @@ class RunDomainTests {
     private static final RunId RUN_ID = RunId.of(1L);
 
     @Test
+    void heartbeatIsMonotonicAndCannotReviveTerminalRuns() {
+        Run run = run(null);
+        assertThat(run.getLastHeartbeatAt()).isNull();
+        assertThatThrownBy(() -> run.heartbeat(NOW.minusSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        run.heartbeat(NOW.plusSeconds(10));
+        run.heartbeat(NOW.plusSeconds(5));
+        assertThat(run.getLastHeartbeatAt()).isEqualTo(NOW.plusSeconds(10));
+        run.complete(NOW.plusSeconds(20));
+        assertThatThrownBy(() -> run.heartbeat(NOW.plusSeconds(30)))
+                .isInstanceOf(RunStateConflictException.class);
+        assertThat(run.getLastHeartbeatAt()).isEqualTo(NOW.plusSeconds(10));
+    }
+
+    @Test
     void completionRetriesPreserveOriginalEndTimeAndRejectFailure() {
         Run run = run(Map.of());
         run.complete(NOW.plusSeconds(10));

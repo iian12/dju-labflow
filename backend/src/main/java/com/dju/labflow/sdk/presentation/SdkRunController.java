@@ -140,6 +140,18 @@ public class SdkRunController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{runId}/heartbeat")
+    @Operation(
+            summary = "실행 생존 신호",
+            description = "RUNNING 실행의 마지막 생존 시각을 서버 시각으로 갱신합니다. 본문은 없습니다.")
+    @ApiResponse(responseCode = "204", description = "생존 시각 갱신", content = @Content)
+    public ResponseEntity<Void> heartbeat(
+            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable("runId") Long runId) {
+        runService.heartbeat(principal, RunId.of(runId));
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{runId}/complete")
     @Operation(summary = "실행 완료", description = "본문 없이 호출합니다. 이미 완료된 실행의 재호출은 기존 종료 결과를 유지합니다.")
     @ApiResponse(responseCode = "204", description = "완료 처리", content = @Content)

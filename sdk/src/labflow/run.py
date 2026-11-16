@@ -30,6 +30,28 @@ class Run:
         self._started = time.monotonic()
         self._entered = False
         self._context_token: Token | None = None
+        self._telemetry = None
+
+    def _start_telemetry(self, capture_output, system_interval, heartbeat_interval) -> None:
+        if capture_output or system_interval is not None or heartbeat_interval is not None:
+            from ._telemetry import Telemetry
+
+            self._telemetry = Telemetry(self, capture_output, system_interval, heartbeat_interval)
+            self._telemetry.start()
+
+    @property
+    def telemetry_status(self) -> dict:
+        """Automatic transport failures are observable without interrupting training."""
+        telemetry = self._telemetry
+        return {
+            "errors": telemetry.errors if telemetry else 0,
+            "dropped_logs": telemetry.dropped_logs if telemetry else 0,
+            "last_error": telemetry.last_error if telemetry else None,
+        }
+
+    def _stop_telemetry(self) -> None:
+        if self._telemetry is not None:
+            self._telemetry.stop()
 
     def __repr__(self) -> str:
         return f"Run(id={self.id}, state={self.state!r})"
@@ -132,6 +154,7 @@ class Run:
         if self._state == "COMPLETED":
             return
         self._running()
+        self._stop_telemetry()
         self._client._request("POST", f"{self._path}/complete")
         self._state = "COMPLETED"
         self._terminal()
@@ -142,21 +165,30 @@ class Run:
         if self._state == "FAILED" and self._failure == error:
             return
         self._running()
+        self._stop_telemetry()
         self._client._request("POST", f"{self._path}/fail", body={"error": error})
         self._state, self._failure = "FAILED", error
         self._terminal()
 
     def _terminal(self) -> None:
         _context.clear(self)
+        self._client._runs.discard(self)
         if self._owns_client:
             self._client.close()
 
     def close(self) -> None:
         """Release owned resources without marking a server run complete or failed."""
+        self._stop_telemetry()
         self._closed = True
         _context.clear(self)
+        self._client._runs.discard(self)
         if self._owns_client:
             self._client.close()
+
+    def heartbeat(self) -> None:
+        """Refresh the server's lastHeartbeatAt using the server clock."""
+        self._running()
+        self._client._request("POST", f"{self._path}/heartbeat")
 
     def __enter__(self) -> "Run":
         self._running()
@@ -192,6 +224,7 @@ class Run:
                 # A warnings-as-errors policy must also preserve the experiment exception.
                 pass
         finally:
+            self._stop_telemetry()
             if self._owns_client:
                 self.close()
             if self._context_token is not None:
