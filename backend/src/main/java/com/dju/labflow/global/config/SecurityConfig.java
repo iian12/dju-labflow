@@ -127,6 +127,8 @@ public class SecurityConfig {
                                                 "/api/v1/projects/{projectId}/runs",
                                                 "/api/v1/projects/{projectId}/runs/compare",
                                                 "/api/v1/projects/{projectId}/runs/summaries",
+                                                "/api/v1/projects/{projectId}/runs/{runId}/artifacts",
+                                                "/api/v1/projects/{projectId}/runs/{runId}/artifacts/{artifactId}",
                                                 "/api/v1/projects/{projectId}/runs/{runId}/metric-series",
                                                 "/api/v1/projects/{projectId}/runs/{runId}",
                                                 "/api/v1/projects/{projectId}/runs/{runId}/records",

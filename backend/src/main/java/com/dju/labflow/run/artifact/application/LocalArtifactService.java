@@ -157,6 +157,11 @@ public class LocalArtifactService {
     @Transactional(readOnly = true)
     public Download download(ProjectApiKeyPrincipal principal, RunId runId, long id) {
         access.requireOwned(principal, runId);
+        return localDownload(runId, id);
+    }
+
+    /** Caller must authorize read access to this run. */
+    public Download localDownload(RunId runId, long id) {
         var artifact =
                 artifacts
                         .findById(RunArtifactId.of(id))
@@ -166,6 +171,8 @@ public class LocalArtifactService {
                                                 && a.getStatus() == ArtifactStatus.READY
                                                 && a.getBucket().equals("local"))
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        return new Download(root.resolve(Long.toString(id)), artifact);
+        Path path = root.resolve(Long.toString(id));
+        if (!Files.isRegularFile(path)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        return new Download(path, artifact);
     }
 }
