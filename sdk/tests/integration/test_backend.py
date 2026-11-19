@@ -39,7 +39,7 @@ def client(settings):
         yield connection
 
 
-def test_records_and_automatic_completion(settings, client):
+def test_records_and_automatic_completion(settings, client, tmp_path):
     url, key, _ = settings
     when = datetime(2026, 11, 1, tzinfo=timezone.utc)
     with labflow.init(
@@ -56,6 +56,17 @@ def test_records_and_automatic_completion(settings, client):
         labflow.log("", level="DEBUG", source="STDOUT")
         labflow.text("prediction", "고양이 🐈\n원문 유지", step=1, recorded_at=when)
         labflow.text("empty", "")
+        source = tmp_path / "가중치.bin"
+        source.write_bytes(bytes(range(256)) * 1025)
+        artifact = labflow.artifact(source, kind="MODEL", request_id="weights")
+        assert run.upload_artifact(source, kind="MODEL", request_id="weights") == artifact
+        destination = tmp_path / "download.bin"
+    assert (
+        client.download_artifact(run.id, artifact, destination).read_bytes() == source.read_bytes()
+    )
+    with Client(api_key=settings[2], base_url=url) as other:
+        with pytest.raises(PermissionDeniedError):
+            other.download_artifact(run.id, artifact, destination)
     assert run.state == "COMPLETED"
     status = client.get_run(run.id)
     assert status["status"] == "COMPLETED"

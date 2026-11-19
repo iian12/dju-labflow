@@ -14,8 +14,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProjectContentsRepositoryImpl implements ProjectContentsRepository {
     private final EntityManager entityManager;
 
-    public ProjectContentsRepositoryImpl(EntityManager entityManager) {
+    private final org.springframework.context.ApplicationEventPublisher events;
+
+    public ProjectContentsRepositoryImpl(
+            EntityManager entityManager,
+            org.springframework.context.ApplicationEventPublisher events) {
         this.entityManager = entityManager;
+        this.events = events;
     }
 
     @Override
@@ -23,6 +28,16 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
         Objects.requireNonNull(projectId, "Project ID must not be null");
         entityManager.flush();
         String runs = "select id from run_entity where project_id = :projectId";
+        var localIds =
+                entityManager
+                        .createQuery(
+                                "select a.id from RunArtifactEntity a where a.bucket = 'local' and a.runId in (select r.id from RunEntity r where r.projectId = :project)",
+                                Long.class)
+                        .setParameter("project", projectId.value())
+                        .getResultList();
+        events.publishEvent(
+                new com.dju.labflow.run.artifact.application.LocalArtifactService.LocalFilesDeleted(
+                        localIds));
         execute("delete from sdk_request_entity where project_id = :projectId", projectId);
         execute(
                 "delete from run_system_metric_gpu where system_metric_id in (select id from run_system_metric_entity where run_id in ("

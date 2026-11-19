@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from contextvars import Token
 from datetime import datetime
 from numbers import Real
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import _context
@@ -68,6 +69,15 @@ class Run:
     @property
     def _path(self) -> str:
         return f"api/v1/sdk/runs/{self.id}"
+
+    def upload_artifact(
+        self, path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+    ) -> int:
+        self._running()
+        return self._client.upload_artifact(self.id, path, kind=kind, request_id=request_id)
+
+    def download_artifact(self, artifact_id: int, destination: str | Path) -> Path:
+        return self._client.download_artifact(self.id, artifact_id, destination)
 
     def params(self, parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
         self._running()

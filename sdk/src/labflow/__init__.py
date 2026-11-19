@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from datetime import datetime
 from numbers import Real
+from pathlib import Path
 
 from . import _context
 from ._validation import Scalar
@@ -28,6 +29,9 @@ __all__ = [
     "Run",
     "init",
     "params",
+    "artifact",
+    "upload_artifact",
+    "download_artifact",
     "metric",
     "log",
     "text",
@@ -96,6 +100,20 @@ def init(
     run._owns_client = True
     _context.current.set(run)
     return run
+
+
+def artifact(
+    path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+) -> int:
+    """Upload a file to the active run and return its artifact ID."""
+    return current_run().upload_artifact(path, kind=kind, request_id=request_id)
+
+
+upload_artifact = artifact
+
+
+def download_artifact(artifact_id: int, destination: str | Path) -> Path:
+    return current_run().download_artifact(artifact_id, destination)
 
 
 def params(parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:

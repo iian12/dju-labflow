@@ -1,9 +1,12 @@
 """Synchronous SDK HTTP client with stable identities for retryable writes."""
 
+import hashlib
 import os
 import re
+import tempfile
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -176,6 +179,85 @@ class Client:
         ):
             raise ProtocolError("Invalid run status response")
         return data
+
+    def upload_artifact(
+        self, run_id: int, path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+    ) -> int:
+        """Upload a local file and return its artifact ID."""
+        run_id = validate.integer(run_id, "Run ID", minimum=1)
+        if self.closed:
+            raise RunStateError("Client is closed")
+        source = Path(path)
+        key = str(uuid4()) if request_id is None else request_id
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key):
+            raise ValidationError("Invalid artifact request_id")
+        with source.open("rb") as stream:
+            headers = {
+                "Content-Type": "application/octet-stream",
+                "X-Request-ID": key,
+                "Content-Length": str(os.fstat(stream.fileno()).st_size),
+            }
+            for attempt in range(self._max_retries + 1):
+                stream.seek(0)
+                try:
+                    response = self._http.post(
+                        f"{_ROOT}/{run_id}/artifacts",
+                        params={"name": source.name, "kind": kind},
+                        headers=headers,
+                        content=iter(lambda: stream.read(65536), b""),
+                    )
+                except httpx.RequestError:
+                    if attempt == self._max_retries:
+                        raise NetworkError(
+                            "Artifact upload interrupted", request_id=key, attempts=attempt + 1
+                        ) from None
+                else:
+                    if response.status_code not in {502, 503, 504} or attempt == self._max_retries:
+                        break
+                time.sleep(0.2 * 2**attempt)
+        if response.status_code >= 400:
+            self._raise_api_error(response)
+        if response.status_code != 201:
+            raise ProtocolError("Expected HTTP 201 for artifact upload")
+        try:
+            return validate.integer(response.json()["artifactId"], "Artifact ID", minimum=1)
+        except (KeyError, TypeError, ValueError):
+            raise ProtocolError("Invalid artifact upload response") from None
+
+    def download_artifact(self, run_id: int, artifact_id: int, destination: str | Path) -> Path:
+        """Stream a verified file to destination, replacing it only after success."""
+        run_id = validate.integer(run_id, "Run ID", minimum=1)
+        artifact_id = validate.integer(artifact_id, "Artifact ID", minimum=1)
+        if self.closed:
+            raise RunStateError("Client is closed")
+        target = Path(destination)
+        temporary = None
+        try:
+            with self._http.stream(
+                "GET",
+                f"{_ROOT}/{run_id}/artifacts/{artifact_id}",
+                headers={"Accept": "application/octet-stream, application/json"},
+            ) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    self._raise_api_error(response)
+                if response.status_code != 200:
+                    raise ProtocolError("Expected HTTP 200 for artifact download")
+                digest = hashlib.sha256()
+                with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as file:
+                    temporary = Path(file.name)
+                    for chunk in response.iter_bytes(65536):
+                        file.write(chunk)
+                        digest.update(chunk)
+                if digest.hexdigest() != response.headers.get("X-Artifact-SHA256"):
+                    raise ProtocolError("Artifact checksum mismatch")
+                temporary.replace(target)
+        except httpx.RequestError:
+            raise NetworkError("Artifact download interrupted") from None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return target
 
     def _redact(self, value: str) -> str:
         return value.replace(self._api_key, "[REDACTED]")

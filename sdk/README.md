@@ -222,3 +222,16 @@ cd backend
 NVIDIA GPU가 있는 테스트 머신에서는 `$env:LABFLOW_EXPECT_GPU = 'true'`를 추가하면 실제 GPU 사용률·메모리의 DB 저장도 필수로 검증합니다. GPU 없는 머신에서는 이 변수를 설정하지 않습니다.
 
 일반 `pytest`에서는 연결 테스트 6개를 건너뛰고, 일반 백엔드 테스트에서도 `LABFLOW_PYTHON`을 지정하지 않으면 이 테스트를 건너뜁니다. 직접 연결 테스트를 실행하려면 폐기 가능한 테스트 서버의 `LABFLOW_TEST_BACKEND_URL`, 그 서버의 두 다른 프로젝트에 발급한 `LABFLOW_TEST_API_KEY`, `LABFLOW_TEST_OTHER_API_KEY`를 모두 지정하고 `python -m pytest -q tests/integration/test_backend.py`를 실행합니다. 직접 실행한 Python 테스트는 서버에 만든 실험을 남깁니다. 이 테스트 전용 변수는 SDK의 일반 환경변수와 분리되어 있습니다.
+
+### Artifact 파일 전송
+
+```python
+import labflow
+
+with labflow.Client() as client:
+    with client.start_run("training") as run:
+        artifact_id = labflow.artifact("weights.pt", kind="MODEL")
+    client.download_artifact(run.id, artifact_id, "weights-copy.pt")
+```
+
+다운로드 경로의 상위 디렉터리는 미리 생성하세요. SDK는 임시 파일에 내려받고 SHA-256을 확인한 후 대상 파일을 교체합니다. 같은 파일을 다시 전송할 때 같은 `request_id`를 지정하면 기존 Artifact ID를 돌려받습니다.
