@@ -102,9 +102,7 @@ def init(
     return run
 
 
-def artifact(
-    path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
-) -> int:
+def artifact(path: str | Path, *, kind: str = "OTHER", request_id: str | None = None) -> int:
     """Upload a file to the active run and return its artifact ID."""
     return current_run().upload_artifact(path, kind=kind, request_id=request_id)
 
