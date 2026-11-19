@@ -2,7 +2,9 @@ package com.dju.labflow.project.key.infrastructure.persistence;
 
 import com.dju.labflow.project.key.domain.ProjectApiKeyStatus;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -12,6 +14,11 @@ import org.springframework.data.repository.query.Param;
 public interface ProjectApiKeyJpaRepository extends JpaRepository<ProjectApiKeyEntity, Long> {
 
     Optional<ProjectApiKeyEntity> findByKeyHash(String keyHash);
+
+    List<ProjectApiKeyEntity> findByProjectIdOrderByCreatedAtDescIdDesc(
+            Long projectId, Pageable pageable);
+
+    long countByProjectId(Long projectId);
 
     /** 상태를 덮어쓰지 않고 사용 시각을 기록하며, 이전에 읽은 관리용 객체는 무효화한다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)

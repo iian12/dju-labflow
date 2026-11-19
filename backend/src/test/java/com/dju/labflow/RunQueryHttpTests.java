@@ -1,5 +1,7 @@
 package com.dju.labflow;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -31,6 +33,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /** JWT/공개 범위/프로젝트 소속/페이지/기록 원문을 실제 HTTP와 H2에서 검증한다. */
 @SpringBootTest
@@ -38,6 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @ActiveProfiles("test")
 class RunQueryHttpTests {
     @Autowired MockMvc mvc;
+    @Autowired JsonMapper json;
     @Autowired IdGenerator ids;
     @Autowired UserRepository users;
     @Autowired ProjectRepository projects;
@@ -121,7 +126,11 @@ class RunQueryHttpTests {
         var f = fixture(ProjectVisibility.PRIVATE);
         var other = user();
         for (String suffix :
-                List.of("", "/" + f.run().value(), "/" + f.run().value() + "/records")) {
+                List.of(
+                        "",
+                        "/" + f.run().value(),
+                        "/" + f.run().value() + "/records",
+                        "/" + f.run().value() + "/records/logs")) {
             mvc.perform(get(base(f) + suffix)).andExpect(status().isUnauthorized());
             mvc.perform(get(base(f) + suffix).cookie(cookie(other)))
                     .andExpect(status().isForbidden());
@@ -133,7 +142,12 @@ class RunQueryHttpTests {
     @Test
     void publicRunRoutesAreReadableWithoutAKeyOrLogin() throws Exception {
         var f = fixture(ProjectVisibility.PUBLIC);
-        for (String suffix : List.of("", "/" + f.run().value(), "/" + f.run().value() + "/records"))
+        for (String suffix :
+                List.of(
+                        "",
+                        "/" + f.run().value(),
+                        "/" + f.run().value() + "/records",
+                        "/" + f.run().value() + "/records/logs"))
             mvc.perform(get(base(f) + suffix)).andExpect(status().isOk());
     }
 
@@ -154,6 +168,276 @@ class RunQueryHttpTests {
         for (String query : List.of("?limit=0", "?limit=1001"))
             mvc.perform(get(base(f) + "/" + f.run().value() + "/records" + query))
                     .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void cursorPagesTraverseEveryRecordKindWithoutDuplicatesAtEqualTimestamps() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        Instant when = Instant.parse("2026-11-19T00:00:00.123456Z");
+        for (int i = 0; i < 7; i++) {
+            records.metrics(
+                    f.principal(),
+                    f.run(),
+                    new RunMetricCommand(
+                            1, (long) i, (double) i, Map.of("loss", (double) i), when));
+            records.log(
+                    f.principal(),
+                    f.run(),
+                    new RunLogCommand("log-" + i, RunLogLevel.INFO, RunLogSource.USER, when));
+            records.text(
+                    f.principal(),
+                    f.run(),
+                    new RunTextCommand("sample", "text-" + i, (long) i, when));
+            records.systemMetric(
+                    f.principal(),
+                    f.run(),
+                    new RunSystemMetricCommand((double) i, 10L, 20L, List.of(), (double) i, when));
+        }
+        for (String kind : List.of("metrics", "logs", "texts", "system-metrics")) {
+            List<Long> ascending = new ArrayList<>();
+            String query = "?limit=2";
+            for (int page = 0; page < 4; page++) {
+                var result = page(f, kind, query);
+                ascending.addAll(itemIds(result));
+                assertThat(result.get("items").size()).isEqualTo(page == 3 ? 1 : 2);
+                assertThat(result.get("hasMore").asBoolean()).isEqualTo(page < 3);
+                if (page < 3) query = "?limit=2&after=" + result.get("nextCursor").asString();
+                else assertThat(result.get("nextCursor").isNull()).isTrue();
+            }
+            assertThat(ascending).hasSize(7).doesNotHaveDuplicates().isSorted();
+            var latest = page(f, kind, "?limit=2&latest=true");
+            assertThat(itemIds(latest)).isEqualTo(ascending.subList(5, 7));
+            List<Long> backwards = new ArrayList<>(itemIds(latest));
+            for (int i = 0; i < 3; i++) {
+                latest = page(f, kind, "?limit=2&before=" + latest.get("beforeCursor").asString());
+                backwards.addAll(0, itemIds(latest));
+            }
+            assertThat(backwards).isEqualTo(ascending);
+            assertThat(latest.get("hasMore").asBoolean()).isFalse();
+            var empty = page(f, kind, "?limit=2&before=" + latest.get("beforeCursor").asString());
+            assertThat(empty.get("items").size()).isZero();
+            assertThat(empty.get("beforeCursor").isNull()).isTrue();
+            assertThat(empty.get("afterCursor").isNull()).isTrue();
+        }
+    }
+
+    @Test
+    void latestAndCursorQueriesReachBeyondTheOldThousandRecordLimit() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        Instant when = Instant.parse("2026-11-19T01:00:00Z");
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status -> {
+                            for (int i = 0; i < 1005; i++)
+                                records.log(
+                                        f.principal(),
+                                        f.run(),
+                                        new RunLogCommand(
+                                                "log-" + i,
+                                                RunLogLevel.INFO,
+                                                RunLogSource.USER,
+                                                when));
+                        });
+        var latest = page(f, "logs", "?limit=10&latest=true");
+        assertThat(latest.get("items").get(0).get("message").asString()).isEqualTo("log-995");
+        assertThat(latest.get("items").get(9).get("message").asString()).isEqualTo("log-1004");
+        mvc.perform(get(base(f) + "/" + f.run().value() + "/records?limit=10&latest=true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.logs[9].message").value("log-1004"));
+        mvc.perform(get(base(f) + "/" + f.run().value() + "/records?limit=10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.logs[0].message").value("log-0"));
+        List<Long> all = new ArrayList<>();
+        String query = "?limit=250";
+        for (int i = 0; i < 5; i++) {
+            var result = page(f, "logs", query);
+            all.addAll(itemIds(result));
+            if (i < 4) query = "?limit=250&after=" + result.get("nextCursor").asString();
+            else assertThat(result.get("hasMore").asBoolean()).isFalse();
+        }
+        assertThat(all).hasSize(1005).doesNotHaveDuplicates().isSorted();
+        records.log(
+                f.principal(),
+                f.run(),
+                new RunLogCommand("new-after-page", RunLogLevel.INFO, RunLogSource.USER, when));
+        var added = page(f, "logs", "?after=" + latest.get("afterCursor").asString());
+        assertThat(added.get("items").size()).isEqualTo(1);
+        assertThat(added.get("items").get(0).get("message").asString()).isEqualTo("new-after-page");
+    }
+
+    @Test
+    void invalidOrCrossStreamCursorsAreRejectedAndAccessIsAlwaysChecked() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        records.log(
+                f.principal(),
+                f.run(),
+                new RunLogCommand("one", RunLogLevel.INFO, RunLogSource.USER, null));
+        String cursor = page(f, "logs", "?latest=true").get("afterCursor").asString();
+        for (String query :
+                List.of(
+                        "?limit=0",
+                        "?limit=1001",
+                        "?before=",
+                        "?after=broken",
+                        "?after=" + "a".repeat(513),
+                        "?before=" + cursor + "&after=" + cursor,
+                        "?latest=true&after=" + cursor,
+                        "?latest=true&before=" + cursor))
+            mvc.perform(get(base(f) + "/" + f.run().value() + "/records/logs" + query))
+                    .andExpect(status().isBadRequest());
+        mvc.perform(get(base(f) + "/" + f.run().value() + "/records/metrics?after=" + cursor))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get(base(f) + "/" + f.run().value() + "/records/unknown"))
+                .andExpect(status().isBadRequest());
+        var other = fixture(ProjectVisibility.PUBLIC);
+        mvc.perform(get(base(other) + "/" + other.run().value() + "/records/logs?after=" + cursor))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get(base(other) + "/" + f.run().value() + "/records/logs?after=" + cursor))
+                .andExpect(status().isNotFound());
+        var privateRun = fixture(ProjectVisibility.PRIVATE);
+        mvc.perform(
+                        get(
+                                base(privateRun)
+                                        + "/"
+                                        + privateRun.run().value()
+                                        + "/records/logs?after="
+                                        + cursor))
+                .andExpect(status().isUnauthorized());
+        var noRecords = page(other, "texts", "?latest=true");
+        assertThat(noRecords.get("items").size()).isZero();
+        assertThat(noRecords.get("hasMore").asBoolean()).isFalse();
+    }
+
+    private JsonNode page(Fixture f, String kind, String query) throws Exception {
+        var response =
+                mvc.perform(
+                                get(base(f) + "/" + f.run().value() + "/records/" + kind + query)
+                                        .cookie(cookie(f.owner())))
+                        .andExpect(status().isOk())
+                        .andReturn()
+                        .getResponse();
+        return json.readTree(response.getContentAsString());
+    }
+
+    @Test
+    void sessionReturnsOnlyTheCurrentUserProfile() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        mvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/auth/me").cookie(cookie(f.owner())))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.userId").value(f.owner().getId().value()))
+                .andExpect(jsonPath("$.name").value("reader"))
+                .andExpect(jsonPath("$.email").value(f.owner().getEmail()))
+                .andExpect(jsonPath("$.encodedPassword").doesNotExist());
+    }
+
+    @Test
+    void summariesAndSingleRunCurveUseActualRecordsAndProjectAccess() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        var second = runs.create(f.principal(), new RunCreateCommand("no metrics", Map.of()));
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(null, 5L, null, Map.of("custom_score", 0.5), null));
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(null, 10L, null, Map.of("custom_score", 0.8), null));
+        mvc.perform(
+                        get(base(f) + "/summaries")
+                                .param(
+                                        "runIds",
+                                        second.value().toString(),
+                                        f.run().value().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].runId").value(second.value()))
+                .andExpect(jsonPath("$[0].metrics.length()").value(0))
+                .andExpect(jsonPath("$[1].lastStep").value(10))
+                .andExpect(jsonPath("$[1].metrics[0].value").value(0.8));
+        mvc.perform(
+                        get(
+                                base(f)
+                                        + "/"
+                                        + f.run().value()
+                                        + "/metric-series?metricKey=custom_score&maxPoints=2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.latestMetric.value").value(0.8))
+                .andExpect(jsonPath("$.series.points.length()").value(2));
+        var other = fixture(ProjectVisibility.PRIVATE);
+        mvc.perform(
+                        get(base(f) + "/summaries")
+                                .param(
+                                        "runIds",
+                                        f.run().value().toString(),
+                                        other.run().value().toString()))
+                .andExpect(status().isNotFound());
+        mvc.perform(
+                        get(
+                                base(f)
+                                        + "/"
+                                        + other.run().value()
+                                        + "/metric-series?metricKey=custom_score"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(base(other) + "/summaries").param("runIds", other.run().value().toString()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(
+                        get(
+                                base(other)
+                                        + "/"
+                                        + other.run().value()
+                                        + "/metric-series?metricKey=custom_score"))
+                .andExpect(status().isUnauthorized());
+        for (String selection : List.of("0", "-1", f.run().value() + "," + f.run().value(), ""))
+            mvc.perform(get(base(f) + "/summaries").param("runIds", selection))
+                    .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void ownerCanPageAndRevokeKeysWithoutExposingSecrets() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        var path = "/api/v1/projects/" + f.project().value() + "/api-keys";
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get(path).cookie(cookie(user()))).andExpect(status().isForbidden());
+        var response =
+                mvc.perform(get(path).cookie(cookie(f.owner())))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.totalElements").value(1))
+                        .andExpect(jsonPath("$.items[0].status").value("ACTIVE"))
+                        .andExpect(jsonPath("$.items[0].keyHash").doesNotExist())
+                        .andExpect(jsonPath("$.items[0].rawApiKey").doesNotExist())
+                        .andReturn()
+                        .getResponse();
+        assertThat(response.getContentAsString()).doesNotContain(f.key());
+        String keyId =
+                json.readTree(response.getContentAsString()).at("/items/0/apiKeyId").asString();
+        mvc.perform(delete(path + "/" + keyId).cookie(cookie(f.owner())))
+                .andExpect(status().isForbidden());
+        var csrf = new Cookie("XSRF-TOKEN", "key-test-csrf");
+        mvc.perform(
+                        delete(path + "/" + keyId)
+                                .cookie(cookie(user()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isForbidden());
+        for (int i = 0; i < 2; i++)
+            mvc.perform(
+                            delete(path + "/" + keyId)
+                                    .cookie(cookie(f.owner()), csrf)
+                                    .header("X-XSRF-TOKEN", csrf.getValue()))
+                    .andExpect(status().isNoContent());
+        mvc.perform(
+                        get("/api/v1/sdk/runs/" + f.run().value())
+                                .header("Authorization", "Bearer " + f.key()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get(path).cookie(cookie(f.owner())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].status").value("REVOKED"));
+    }
+
+    private List<Long> itemIds(JsonNode page) {
+        List<Long> result = new ArrayList<>();
+        for (var item : page.get("items")) result.add(item.get("id").longValue());
+        return result;
     }
 
     User user() {

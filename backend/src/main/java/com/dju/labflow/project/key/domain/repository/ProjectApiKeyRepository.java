@@ -2,7 +2,9 @@ package com.dju.labflow.project.key.domain.repository;
 
 import com.dju.labflow.project.key.domain.ProjectApiKey;
 import com.dju.labflow.project.key.domain.ProjectApiKeyId;
+import com.dju.labflow.project.project.domain.ProjectId;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /** 프로젝트 API 키 신규 저장과 해시 조회의 영속성 계약. */
@@ -15,6 +17,12 @@ public interface ProjectApiKeyRepository {
     void update(ProjectApiKey projectApiKey);
 
     Optional<ProjectApiKey> findByKeyHash(String keyHash);
+
+    Optional<ProjectApiKey> findById(ProjectApiKeyId id);
+
+    List<ProjectApiKey> findByProjectId(ProjectId projectId, int page, int size);
+
+    long countByProjectId(ProjectId projectId);
 
     /** 활성 키의 사용 시각만 단조 증가시킨다. 폐기되었거나 사라진 키는 false를 반환한다. */
     boolean recordUsage(ProjectApiKeyId id, Instant usedAt);

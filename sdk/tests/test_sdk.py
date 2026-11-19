@@ -25,6 +25,17 @@ KEY = "lfp_test-secret"
 RUN_ID = 9007199254740993  # Preserve integers beyond JavaScript's safe-integer range.
 
 
+def manual_client(**kwargs):
+    """Keep explicit-recording contract tests independent of automatic collection."""
+    return Client(
+        collect_environment=False,
+        capture_output=False,
+        system_metrics_interval=None,
+        heartbeat_interval=None,
+        **kwargs,
+    )
+
+
 @pytest.fixture
 def connection():
     requests = []
@@ -37,7 +48,7 @@ def connection():
             return httpx.Response(200, json={"runId": RUN_ID, "status": "COMPLETED"})
         return httpx.Response(204)
 
-    with Client(
+    with manual_client(
         api_key=KEY,
         base_url="https://labflow.test/context/",
         transport=httpx.MockTransport(respond),
@@ -196,13 +207,13 @@ def test_lengths_follow_java_utf16_contract(connection):
 )
 def test_configuration_validation(options):
     with pytest.raises(ConfigurationError):
-        Client(**({"api_key": KEY} | options))
+        manual_client(**({"api_key": KEY} | options))
 
 
 def test_environment_and_explicit_settings(monkeypatch):
     monkeypatch.delenv("LABFLOW_API_KEY", raising=False)
     with pytest.raises(ConfigurationError):
-        Client()
+        manual_client()
     monkeypatch.setenv("LABFLOW_API_KEY", KEY)
     monkeypatch.setenv("LABFLOW_BASE_URL", "https://env.test")
     calls = []
@@ -211,10 +222,10 @@ def test_environment_and_explicit_settings(monkeypatch):
         calls.append(request)
         return httpx.Response(201, json={"runId": 1})
 
-    with Client(transport=httpx.MockTransport(handler)) as client:
+    with manual_client(transport=httpx.MockTransport(handler)) as client:
         client.start_run("env")
         assert KEY not in repr(client)
-    with Client(
+    with manual_client(
         api_key="explicit", base_url="https://explicit.test", transport=httpx.MockTransport(handler)
     ) as client:
         client.start_run("explicit")
@@ -246,7 +257,7 @@ def test_api_error_mapping_and_redaction(status, error):
             },
         )
 
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(error) as caught:
             client.start_run("error")
         assert caught.value.status_code == status
@@ -257,7 +268,7 @@ def test_api_error_mapping_and_redaction(status, error):
 
 
 def test_html_error_is_not_echoed():
-    with Client(
+    with manual_client(
         api_key=KEY,
         transport=httpx.MockTransport(lambda r: httpx.Response(502, text=f"<html>{KEY}</html>")),
     ) as client:
@@ -287,7 +298,7 @@ def test_invalid_responses_and_redirects_are_not_retried(response):
         calls.append(request)
         return response
 
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ProtocolError):
             client.start_run("bad-server")
     assert len(calls) == 1
@@ -297,7 +308,7 @@ def test_invalid_responses_and_redirects_are_not_retried(response):
     "data", [None, [], {}, {"runId": 1, "status": []}, {"runId": True, "status": "RUNNING"}]
 )
 def test_malformed_status_response(data):
-    with Client(
+    with manual_client(
         api_key=KEY, transport=httpx.MockTransport(lambda r: httpx.Response(200, json=data))
     ) as client:
         with pytest.raises(ProtocolError):
@@ -312,7 +323,7 @@ def test_network_failure_has_no_retry_or_secret(error):
         calls.append(request)
         raise error(f"sensitive {KEY}", request=request)
 
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(NetworkError) as caught:
             client.start_run("network")
     assert len(calls) == 1
@@ -350,7 +361,7 @@ def test_failed_completion_can_be_manually_retried():
             raise httpx.ReadTimeout("lost response")
         return httpx.Response(204)
 
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         run = client.start_run("retry-complete")
         with pytest.raises(NetworkError):
             run.finish()
@@ -390,7 +401,7 @@ def test_reporting_failure_does_not_mask_experiment_error():
         return httpx.Response(500)
 
     original = ValueError("experiment error")
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         with pytest.warns(RuntimeWarning, match="original exception is preserved"):
             with pytest.raises(ValueError) as caught:
                 with client.start_run("error"):
@@ -417,7 +428,7 @@ def test_warnings_as_errors_does_not_mask_experiment_failure():
             return httpx.Response(201, json={"runId": 1})
         raise httpx.ConnectError("backend unavailable")
 
-    with Client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
+    with manual_client(api_key=KEY, transport=httpx.MockTransport(handler)) as client:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             with pytest.raises(ValueError, match="original training error"):

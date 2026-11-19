@@ -73,6 +73,14 @@ public class RunService {
         runRepository.update(run);
     }
 
+    /** 기록/종료와 동일한 실행 잠금 및 프로젝트 접근 정책을 적용한다. */
+    @Transactional
+    public void heartbeat(ProjectApiKeyPrincipal principal, RunId runId) {
+        Run run = runAccessPolicy.requireOwnedForUpdate(principal, runId);
+        run.heartbeat(clock.instant());
+        runRepository.update(run);
+    }
+
     @Transactional
     public void fail(ProjectApiKeyPrincipal principal, RunId runId, RunFailCommand command) {
         requestValidator.validate(command);

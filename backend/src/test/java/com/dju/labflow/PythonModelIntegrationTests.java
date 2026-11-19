@@ -132,7 +132,23 @@ class PythonModelIntegrationTests {
                                 .getValue())
                 .isGreaterThanOrEqualTo(0.85)
                 .isLessThanOrEqualTo(1.0);
-        assertThat(logs.findByRunId(completed.getId(), 100)).hasSize(22);
+        assertThat(
+                        logs.findByRunId(completed.getId(), 100).stream()
+                                .filter(
+                                        log ->
+                                                log.getSource()
+                                                        == com.dju.labflow.run.log.domain
+                                                                .RunLogSource.USER))
+                .hasSize(22);
+        assertThat(
+                        logs.findByRunId(completed.getId(), 100).stream()
+                                .filter(
+                                        log ->
+                                                log.getSource()
+                                                        == com.dju.labflow.run.log.domain
+                                                                .RunLogSource.STDOUT))
+                .hasSizeGreaterThanOrEqualTo(20);
+        assertThat(completed.getLastHeartbeatAt()).isNotNull();
         assertThat(texts.findByRunId(completed.getId(), 100))
                 .hasSize(2)
                 .extracting("key")

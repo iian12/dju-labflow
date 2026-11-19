@@ -28,6 +28,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -115,6 +116,11 @@ class SdkRunHttpTests {
                                             .setParameter("ids", owners)
                                             .getResultList();
                             var ids = runs.stream().map(RunEntity::getId).toList();
+                            em.createQuery(
+                                            "delete from SdkRequestEntity r where r.projectId in "
+                                                    + "(select p.id from ProjectEntity p where p.createdBy in :ids)")
+                                    .setParameter("ids", owners)
+                                    .executeUpdate();
                             if (!ids.isEmpty()) {
                                 for (String type :
                                         List.of(
@@ -587,6 +593,7 @@ class SdkRunHttpTests {
                                             BASE + "/{runId}/logs",
                                             BASE + "/{runId}/texts",
                                             BASE + "/{runId}/system-metrics",
+                                            BASE + "/{runId}/heartbeat",
                                             BASE + "/{runId}/complete",
                                             BASE + "/{runId}/fail")) {
                 String operation = "$.paths['" + route + "']." + verb;
@@ -617,6 +624,226 @@ class SdkRunHttpTests {
                                                 "http://localhost/labflow" + BASE + "/")));
     }
 
+    @Test
+    void duplicateCreateReturnsOriginalResultAndCanonicalizesMetadataOrder() throws Exception {
+        Client client = client();
+        String firstBody = "{\"name\":\"dedupe\",\"metadata\":{\"b\":\"2\",\"a\":\"1\"}}";
+        var first =
+                identified(client, BASE, firstBody, "create-1")
+                        .andExpect(status().isCreated())
+                        .andReturn()
+                        .getResponse();
+        identified(
+                        client,
+                        BASE,
+                        "{\"metadata\":{\"a\":\"1\",\"b\":\"2\"},\"name\":\"dedupe\"}",
+                        "create-1")
+                .andExpect(status().isCreated())
+                .andExpect(content().json(first.getContentAsString()))
+                .andExpect(
+                        header().string(
+                                        HttpHeaders.LOCATION,
+                                        first.getHeader(HttpHeaders.LOCATION)));
+        identified(client, BASE, "{\"name\":\"different\"}", "create-1")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+        var secondKey =
+                issuance.issue(
+                        client.ownerId(),
+                        client.projectId(),
+                        new IssueProjectApiKeyCommand("rotated"));
+        identified(
+                        new Client(client.ownerId(), client.projectId(), secondKey.rawApiKey()),
+                        BASE,
+                        firstBody,
+                        "create-1")
+                .andExpect(status().isCreated())
+                .andExpect(content().json(first.getContentAsString()));
+        Client other = client();
+        identified(other, BASE, firstBody, "create-1").andExpect(status().isCreated());
+    }
+
+    @Test
+    void appendRecordsAreWrittenOnceAndReplayWorksAfterCompletion() throws Exception {
+        Client client = client();
+        RunId id = create(client);
+        List<Write> records =
+                validWrites().stream()
+                        .filter(write -> !Set.of("/complete", "/fail").contains(write.suffix()))
+                        .toList();
+        for (Write write : records) {
+            String requestId = "record-" + write.suffix().substring(1);
+            identified(client, path(id) + write.suffix(), write.body(), requestId)
+                    .andExpect(status().isNoContent());
+            identified(client, path(id) + write.suffix(), write.body(), requestId)
+                    .andExpect(status().isNoContent());
+        }
+        assertThat(parameters.findByRunId(id)).hasSize(1);
+        assertThat(metrics.findByRunId(id, 100)).hasSize(1);
+        assertThat(logs.findByRunId(id, 100)).hasSize(1);
+        assertThat(texts.findByRunId(id, 100)).hasSize(1);
+        assertThat(systemMetrics.findByRunId(id, 100)).hasSize(1);
+        String heartbeat =
+                mvc.perform(
+                                get(path(id))
+                                        .header(
+                                                HttpHeaders.AUTHORIZATION,
+                                                "Bearer " + client.rawKey()))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        identified(client, path(id) + "/complete", null, "finish-1")
+                .andExpect(status().isNoContent());
+        identified(client, path(id) + "/complete", null, "finish-1")
+                .andExpect(status().isNoContent());
+        for (Write write : records) {
+            identified(
+                            client,
+                            path(id) + write.suffix(),
+                            write.body(),
+                            "record-" + write.suffix().substring(1))
+                    .andExpect(status().isNoContent());
+        }
+        mvc.perform(get(path(id)).header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey()))
+                .andExpect(
+                        jsonPath("$.lastHeartbeatAt")
+                                .value(
+                                        jsonMapper
+                                                .readTree(heartbeat)
+                                                .get("lastHeartbeatAt")
+                                                .asString()));
+        identified(
+                        client,
+                        path(id) + "/logs",
+                        records.stream()
+                                .filter(w -> w.suffix().equals("/logs"))
+                                .findFirst()
+                                .orElseThrow()
+                                .body(),
+                        "new-after-finish")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RUN_STATE_CONFLICT"));
+        assertThat(logs.findByRunId(id, 100)).hasSize(1);
+    }
+
+    @Test
+    void failedWriteRollsBackRecordsAndDoesNotConsumeRequestId() throws Exception {
+        Client client = client();
+        RunId id = create(client);
+        write(client, id, "/parameters", "{\"parameters\":{\"optimizer\":\"adam\"}}")
+                .andExpect(status().isNoContent());
+        identified(
+                        client,
+                        path(id) + "/parameters",
+                        "{\"parameters\":{\"new\":\"value\",\"optimizer\":\"sgd\"}}",
+                        "rollback-1")
+                .andExpect(status().isConflict());
+        assertThat(parameters.findByRunId(id)).hasSize(1);
+        identified(
+                        client,
+                        path(id) + "/parameters",
+                        "{\"parameters\":{\"new\":\"value\",\"optimizer\":\"adam\"}}",
+                        "rollback-1")
+                .andExpect(status().isNoContent());
+        assertThat(parameters.findByRunId(id)).hasSize(2);
+    }
+
+    @Test
+    void requestIdentityIncludesRunOperationAndPayloadAndRemainsCaseSensitive() throws Exception {
+        Client client = client();
+        RunId first = create(client);
+        RunId second = create(client);
+        String body = "{\"message\":\"one\",\"source\":\"USER\",\"level\":\"INFO\"}";
+        identified(client, path(first) + "/logs", body, "Event-A")
+                .andExpect(status().isNoContent());
+        identified(client, path(first) + "/logs", body, "event-a")
+                .andExpect(status().isNoContent());
+        identified(client, path(first) + "/logs", body.replace("one", "two"), "Event-A")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+        identified(client, path(second) + "/logs", body, "Event-A")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+        identified(client, path(first) + "/heartbeat", null, "Event-A")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+        Client other = client();
+        identified(other, path(first) + "/logs", body, "Event-A").andExpect(status().isForbidden());
+        assertThat(logs.findByRunId(first, 100)).hasSize(2);
+        assertThat(logs.findByRunId(second, 100)).isEmpty();
+        for (String invalid : List.of("", " ", "a".repeat(65), "bad/id", "한글")) {
+            identified(client, path(first) + "/logs", body, invalid)
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    void concurrentDuplicatesCreateOneRunAndOneLog() throws Exception {
+        Client client = client();
+        ExecutorService executor = Executors.newFixedThreadPool(4);
+        try {
+            List<Callable<Long>> creates = new ArrayList<>();
+            for (int i = 0; i < 8; i++)
+                creates.add(
+                        () ->
+                                jsonMapper
+                                        .readValue(
+                                                identified(
+                                                                client,
+                                                                BASE,
+                                                                "{\"name\":\"concurrent\"}",
+                                                                "concurrent-create")
+                                                        .andExpect(status().isCreated())
+                                                        .andReturn()
+                                                        .getResponse()
+                                                        .getContentAsString(),
+                                                RunCreateResponse.class)
+                                        .runId());
+            List<Future<Long>> results = executor.invokeAll(creates, 15, TimeUnit.SECONDS);
+            Set<Long> ids = new HashSet<>();
+            for (Future<Long> result : results) ids.add(result.get());
+            assertThat(ids).hasSize(1);
+            Long id = ids.iterator().next();
+            List<Callable<Void>> writes = new ArrayList<>();
+            for (int i = 0; i < 8; i++)
+                writes.add(
+                        () -> {
+                            identified(
+                                            client,
+                                            BASE + "/" + id + "/logs",
+                                            "{\"message\":\"one\",\"source\":\"USER\",\"level\":\"INFO\"}",
+                                            "concurrent-log")
+                                    .andExpect(status().isNoContent());
+                            return null;
+                        });
+            for (Future<Void> result : executor.invokeAll(writes, 15, TimeUnit.SECONDS))
+                result.get();
+            assertThat(logs.findByRunId(RunId.of(id), 100)).hasSize(1);
+            Long count =
+                    new TransactionTemplate(transactions)
+                            .execute(
+                                    status ->
+                                            em.createQuery(
+                                                            "select count(r) from RunEntity r where r.projectId=:id",
+                                                            Long.class)
+                                                    .setParameter("id", client.projectId().value())
+                                                    .getSingleResult());
+            assertThat(count).isEqualTo(1L);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private ResultActions identified(Client client, String path, String body, String requestId)
+            throws Exception {
+        var request =
+                request(path.endsWith("/parameters") ? HttpMethod.PUT : HttpMethod.POST, path)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
+                        .header("X-Request-ID", requestId);
+        if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
+        return mvc.perform(request);
+    }
+
     private List<Write> validWrites() {
         return List.of(
                 new Write("/parameters", "{\"parameters\":{\"optimizer\":\"adam\"}}"),
@@ -624,6 +851,7 @@ class SdkRunHttpTests {
                 new Write("/logs", "{\"message\":\"x\",\"level\":\"INFO\",\"source\":\"USER\"}"),
                 new Write("/texts", "{\"key\":\"prediction\",\"text\":\"cat\"}"),
                 new Write("/system-metrics", "{\"system\":{\"cpuUtilization\":10}}"),
+                new Write("/heartbeat", null),
                 new Write("/complete", null),
                 new Write("/fail", "{\"error\":\"failure\"}"));
     }

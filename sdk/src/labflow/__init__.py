@@ -1,11 +1,13 @@
-"""Minimal synchronous LabFlow experiment tracking SDK."""
+"""LabFlow experiment tracking with explicit records and automatic telemetry."""
 
 from collections.abc import Mapping
 from datetime import datetime
 from numbers import Real
+from pathlib import Path
 
 from . import _context
 from ._validation import Scalar
+from ._version import __version__ as __version__
 from .client import Client
 from .errors import (
     ApiError,
@@ -22,17 +24,20 @@ from .errors import (
 )
 from .run import Run
 
-__version__ = "0.1.1"
 __all__ = [
     "Client",
     "Run",
     "init",
     "params",
+    "artifact",
+    "upload_artifact",
+    "download_artifact",
     "metric",
     "log",
     "text",
     "finish",
     "fail",
+    "heartbeat",
     "current_run",
     "LabflowError",
     "ApiError",
@@ -62,6 +67,12 @@ def init(
     base_url: str | None = None,
     metadata: Mapping[str, Scalar] | None = None,
     timeout: float = 10.0,
+    collect_environment: bool = True,
+    capture_output: bool = True,
+    system_metrics_interval: float | None = 10.0,
+    heartbeat_interval: float | None = 30.0,
+    max_retries: int = 0,
+    request_id: str | None = None,
 ) -> Run:
     previous = _context.current.get()
     if (
@@ -71,9 +82,18 @@ def init(
         and not previous._client.closed
     ):
         raise RunStateError("An active run already exists; finish or fail it first")
-    client = Client(api_key=api_key, base_url=base_url, timeout=timeout)
+    client = Client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        collect_environment=collect_environment,
+        capture_output=capture_output,
+        system_metrics_interval=system_metrics_interval,
+        heartbeat_interval=heartbeat_interval,
+        max_retries=max_retries,
+    )
     try:
-        run = client.start_run(name, metadata=metadata)
+        run = client.start_run(name, metadata=metadata, request_id=request_id)
     except BaseException:
         client.close()
         raise
@@ -82,8 +102,22 @@ def init(
     return run
 
 
-def params(parameters: Mapping[str, Scalar]) -> None:
-    current_run().params(parameters)
+def artifact(
+    path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+) -> int:
+    """Upload a file to the active run and return its artifact ID."""
+    return current_run().upload_artifact(path, kind=kind, request_id=request_id)
+
+
+upload_artifact = artifact
+
+
+def download_artifact(artifact_id: int, destination: str | Path) -> Path:
+    return current_run().download_artifact(artifact_id, destination)
+
+
+def params(parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
+    current_run().params(parameters, request_id=request_id)
 
 
 def metric(
@@ -93,27 +127,49 @@ def metric(
     epoch: int | None = None,
     elapsed_time: float | None = None,
     recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
     current_run().metric(
-        values, step=step, epoch=epoch, elapsed_time=elapsed_time, recorded_at=recorded_at
+        values,
+        step=step,
+        epoch=epoch,
+        elapsed_time=elapsed_time,
+        recorded_at=recorded_at,
+        request_id=request_id,
     )
 
 
 def log(
-    message: str, *, level: str = "INFO", source: str = "USER", recorded_at: datetime | None = None
+    message: str,
+    *,
+    level: str = "INFO",
+    source: str = "USER",
+    recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
-    current_run().log(message, level=level, source=source, recorded_at=recorded_at)
+    current_run().log(
+        message, level=level, source=source, recorded_at=recorded_at, request_id=request_id
+    )
 
 
 def text(
-    key: str, value: str, *, step: int | None = None, recorded_at: datetime | None = None
+    key: str,
+    value: str,
+    *,
+    step: int | None = None,
+    recorded_at: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
-    current_run().text(key, value, step=step, recorded_at=recorded_at)
+    current_run().text(key, value, step=step, recorded_at=recorded_at, request_id=request_id)
 
 
-def finish() -> None:
-    current_run().finish()
+def finish(*, request_id: str | None = None) -> None:
+    current_run().finish(request_id=request_id)
 
 
-def fail(error: str) -> None:
-    current_run().fail(error)
+def fail(error: str, *, request_id: str | None = None) -> None:
+    current_run().fail(error, request_id=request_id)
+
+
+def heartbeat(*, request_id: str | None = None) -> None:
+    current_run().heartbeat(request_id=request_id)
