@@ -1,0 +1,15 @@
+.live-error{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:16px 20px;margin:0 0 20px;border:1px solid var(--failed);border-radius:8px;color:var(--failed);background:var(--surface);font-size:13px;line-height:1.7}
+.live-error span{flex:1;min-width:120px;overflow-wrap:anywhere}.live-error a{color:var(--accent);text-decoration:underline}
+.live-empty{padding:24px;color:var(--muted);font-size:13px;line-height:1.8}
+.live-chart-note{padding:12px 24px;color:var(--muted);font-size:11px}
+.live-table-scroll{overflow:auto}.live-table-scroll td{white-space:pre-wrap;max-width:320px;overflow-wrap:anywhere}
+.live-info{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;margin:24px 0;font-size:13px;line-height:1.7}
+.live-info dt{color:var(--muted)}.live-info dd{margin:0;overflow-wrap:anywhere}
+.live-key-form{display:flex;align-items:flex-end;gap:12px;margin:20px 0}.live-key-form label{margin:0;flex:1}
+.live-app .modal label{display:flex;flex-direction:column;gap:10px;margin:20px 0}.live-app fieldset{border:0;margin:0;padding:0;min-width:0}
+:root .live-app .primary{background:var(--action);border-color:var(--action);color:#fff}:root .live-app .primary:hover{background:var(--action-hover)}
+.live-run-tabs{overflow-x:auto}.live-run-tabs a{white-space:nowrap}.live-app .record-controls{margin-top:24px}
+.live-app .run-heading h1{overflow-wrap:anywhere}.live-app .page-heading h1{overflow-wrap:anywhere}
+.live-app .settings-form>button{margin-top:16px}.live-app .empty p{margin:12px 0 24px}.live-app .empty a{color:var(--accent)}
+.live-app .project-card h2,.live-app .project-card p{overflow-wrap:anywhere}
+@media(max-width:720px){.live-key-form{flex-direction:column;align-items:stretch}.live-info{grid-template-columns:84px minmax(0,1fr)}.live-app .toolbar{flex-wrap:wrap}.live-app .toolbar>.compact{margin-left:0}.live-app header{padding-inline:16px}.live-app .account-actions{gap:8px}.live-app .account-actions button{font-size:11px;padding:6px 8px}.live-run-tabs{gap:20px}.live-app .overview-grid .prose{display:block}}

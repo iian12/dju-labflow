@@ -20,6 +20,7 @@ public class Run {
     private RunStatus status;
     private final Instant startedAt;
     private Instant endedAt;
+    private Instant lastHeartbeatAt;
     private String error;
     private final Long version;
 
@@ -100,6 +101,38 @@ public class Run {
     public void requireRunning() {
         if (status != RunStatus.RUNNING)
             throw new RunStateConflictException("Run has already ended");
+    }
+
+    /** 서버 시각으로 생존 신호를 갱신하며 시계 역행으로 이전 값을 덮어쓰지 않는다. */
+    public void heartbeat(Instant now) {
+        requireRunning();
+        InputValidation.required(now, "Heartbeat time");
+        if (now.isBefore(startedAt))
+            throw new IllegalArgumentException("Heartbeat time must not precede start time");
+        if (lastHeartbeatAt == null || now.isAfter(lastHeartbeatAt)) lastHeartbeatAt = now;
+    }
+
+    /** 기존 실행 및 Heartbeat 미수신 실행은 null을 유지한다. */
+    public static Run restore(
+            RunId id,
+            ProjectId projectId,
+            UserId createdBy,
+            String name,
+            Map<String, String> metadata,
+            RunStatus status,
+            Instant startedAt,
+            Instant endedAt,
+            String error,
+            Long version,
+            Instant lastHeartbeatAt) {
+        Run run =
+                restore(
+                        id, projectId, createdBy, name, metadata, status, startedAt, endedAt, error,
+                        version);
+        if (lastHeartbeatAt != null && lastHeartbeatAt.isBefore(startedAt))
+            throw new IllegalArgumentException("Heartbeat time must not precede start time");
+        run.lastHeartbeatAt = lastHeartbeatAt;
+        return run;
     }
 
     /** 같은 종료 작업의 재전송은 저장한 결과를 유지한다. */

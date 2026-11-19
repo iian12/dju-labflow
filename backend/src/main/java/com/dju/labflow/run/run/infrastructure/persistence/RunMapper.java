@@ -20,6 +20,7 @@ public final class RunMapper {
                 .startedAt(run.getStartedAt())
                 .endedAt(run.getEndedAt())
                 .error(run.getError())
+                .lastHeartbeatAt(run.getLastHeartbeatAt())
                 .build();
     }
 
@@ -34,6 +35,7 @@ public final class RunMapper {
                 entity.getStartedAt(),
                 entity.getEndedAt(),
                 entity.getError(),
-                entity.getVersion());
+                entity.getVersion(),
+                entity.getLastHeartbeatAt());
     }
 }

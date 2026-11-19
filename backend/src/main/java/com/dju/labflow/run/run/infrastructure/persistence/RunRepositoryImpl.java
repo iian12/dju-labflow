@@ -45,6 +45,7 @@ public class RunRepositoryImpl implements RunRepository {
         if (run.getVersion() == null || !run.getVersion().equals(entity.getVersion()))
             throw new ObjectOptimisticLockingFailureException(RunEntity.class, run.getId().value());
         entity.update(run.getStatus(), run.getEndedAt(), run.getError());
+        entity.updateHeartbeat(run.getLastHeartbeatAt());
     }
 
     @Override

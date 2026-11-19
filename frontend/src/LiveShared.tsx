@@ -1,0 +1,11 @@
+import type { ReactNode } from 'react';
+import { ApiError } from './api.ts';
+import type { Status } from './liveTypes.ts';
+export const labels: Record<Status, string> = { RUNNING: '진행 중', COMPLETED: '완료', FAILED: '실패' };
+export const date = (value?: string | null) => value ? new Date(value).toLocaleString('ko-KR') : '—';
+export function number(value?: number | null) { return value == null || !Number.isFinite(value) ? '—' : Math.abs(value) >= 1e6 || (value !== 0 && Math.abs(value) < .0001) ? value.toExponential(3) : new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 6 }).format(value); }
+export function duration(start: string, end: string | null) { const seconds = Math.max(0, Math.floor(((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 1000)); return seconds < 60 ? `${seconds}초` : `${Math.floor(seconds / 60)}분 ${seconds % 60}초`; }
+export function Badge({ status }: { status: Status }) { return <span className={`badge ${status}`}><i/>{labels[status]}</span>; }
+export function ErrorBox({ error, retry }: { error?: unknown; retry?: () => void }) { return error ? <div className="live-error" role="alert"><span>{error instanceof Error ? error.message : '요청을 처리하지 못했습니다.'}</span>{retry && <button onClick={retry}>다시 불러오기</button>}{error instanceof ApiError && error.status === 401 && <a href="#/login">로그인</a>}</div> : null; }
+export function Empty({ title, children }: { title: string; children?: ReactNode }) { return <section className="panel empty"><h2>{title}</h2>{children}</section>; }
+export function Modal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) { return <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) close(); }} onKeyDown={event => { if (event.key === 'Escape') close(); }}><section role="dialog" aria-modal="true" aria-label={title} className="modal"><div className="section-title"><h2>{title}</h2><button aria-label="닫기" onClick={close}>×</button></div>{children}</section></div>; }

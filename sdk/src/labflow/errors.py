@@ -22,6 +22,11 @@ class RunStateError(LabflowError):
 class NetworkError(LabflowError):
     """A transport failure occurred; the server-side outcome can be unknown."""
 
+    def __init__(self, message: str, *, request_id: str | None = None, attempts: int = 1) -> None:
+        self.request_id = request_id
+        self.attempts = attempts
+        super().__init__(message)
+
 
 class ProtocolError(LabflowError):
     """The server returned an unexpected status or response shape."""

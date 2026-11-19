@@ -5,9 +5,12 @@ import com.dju.labflow.project.key.domain.ProjectApiKeyId;
 import com.dju.labflow.project.key.domain.ProjectApiKeyStatus;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
 import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
+import com.dju.labflow.project.project.domain.ProjectId;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,5 +71,25 @@ public class ProjectApiKeyRepositoryImpl implements ProjectApiKeyRepository {
         return projectApiKeyJpaRepository.recordUsage(
                         id.value(), usedAt, ProjectApiKeyStatus.ACTIVE)
                 == 1;
+    }
+
+    @Override
+    public Optional<ProjectApiKey> findById(ProjectApiKeyId id) {
+        return projectApiKeyJpaRepository.findById(id.value()).map(ProjectApiKeyMapper::toDomain);
+    }
+
+    @Override
+    public List<ProjectApiKey> findByProjectId(ProjectId projectId, int page, int size) {
+        return projectApiKeyJpaRepository
+                .findByProjectIdOrderByCreatedAtDescIdDesc(
+                        projectId.value(), PageRequest.of(page, size))
+                .stream()
+                .map(ProjectApiKeyMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public long countByProjectId(ProjectId projectId) {
+        return projectApiKeyJpaRepository.countByProjectId(projectId.value());
     }
 }

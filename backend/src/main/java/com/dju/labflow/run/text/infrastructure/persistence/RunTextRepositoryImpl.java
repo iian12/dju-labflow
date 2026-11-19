@@ -1,5 +1,7 @@
 package com.dju.labflow.run.text.infrastructure.persistence;
 
+import com.dju.labflow.run.run.domain.RecordPageQuery;
+import com.dju.labflow.run.run.domain.RecordSlice;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.RunValidation;
 import com.dju.labflow.run.text.domain.RunText;
@@ -36,5 +38,30 @@ public class RunTextRepositoryImpl implements RunTextRepository {
                 .stream()
                 .map(RunTextMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public RecordSlice<RunText> findPage(RunId runId, RecordPageQuery query) {
+        Objects.requireNonNull(runId, "Run ID must not be null");
+        Objects.requireNonNull(query, "Page query must not be null");
+        var page = PageRequest.of(0, query.limit() + 1);
+        var position = query.position();
+        List<RunTextEntity> fetched;
+        if (position == null) {
+            fetched =
+                    query.backwards()
+                            ? runTextJpaRepository.findByRunIdOrderByRecordedAtDescIdDesc(
+                                    runId.value(), page)
+                            : runTextJpaRepository.findByRunIdOrderByRecordedAtAscIdAsc(
+                                    runId.value(), page);
+        } else {
+            fetched =
+                    query.backwards()
+                            ? runTextJpaRepository.findBefore(
+                                    runId.value(), position.recordedAt(), position.id(), page)
+                            : runTextJpaRepository.findAfter(
+                                    runId.value(), position.recordedAt(), position.id(), page);
+        }
+        return RecordSlice.from(fetched.stream().map(RunTextMapper::toDomain).toList(), query);
     }
 }

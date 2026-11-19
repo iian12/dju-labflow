@@ -13,6 +13,7 @@ import com.dju.labflow.run.metric.domain.repository.RunMetricRepository;
 import com.dju.labflow.run.parameter.domain.repository.RunParameterRepository;
 import com.dju.labflow.run.run.domain.*;
 import com.dju.labflow.run.run.domain.repository.RunRepository;
+import com.dju.labflow.run.systemmetric.domain.repository.RunSystemMetricRepository;
 import com.dju.labflow.run.text.domain.repository.RunTextRepository;
 import com.dju.labflow.user.domain.*;
 import com.dju.labflow.user.domain.repository.UserRepository;
@@ -48,6 +49,7 @@ class PythonSdkIntegrationTests {
     @Autowired RunMetricRepository metrics;
     @Autowired RunLogRepository logs;
     @Autowired RunTextRepository texts;
+    @Autowired RunSystemMetricRepository systemMetrics;
     @Autowired PlatformTransactionManager transactions;
     @Autowired EntityManager em;
     private UserId ownerId;
@@ -126,10 +128,10 @@ class PythonSdkIntegrationTests {
                         .replace(otherKey, "[REDACTED]");
         assertThat(finished).as("Python SDK test process timed out: %s", report).isTrue();
         assertThat(process.exitValue()).as("Python SDK HTTP tests: %s", report).isZero();
-        assertThat(report).contains("4 passed");
+        assertThat(report).contains("6 passed");
 
         List<Run> saved = runs.findByProjectId(projectId, 100);
-        assertThat(saved).hasSize(5).allSatisfy(run -> assertThat(run.getEndedAt()).isNotNull());
+        assertThat(saved).hasSize(8).allSatisfy(run -> assertThat(run.getEndedAt()).isNotNull());
         Run completed = named(saved, "python-sdk-completed");
         assertThat(completed.getStatus()).isEqualTo(RunStatus.COMPLETED);
         assertThat(completed.getMetadata())
@@ -169,6 +171,59 @@ class PythonSdkIntegrationTests {
                                 .orElseThrow()
                                 .getRecordedAt())
                 .isEqualTo(Instant.parse("2026-11-01T00:00:00Z"));
+        Run telemetry = named(saved, "python-sdk-telemetry");
+        assertThat(telemetry.getLastHeartbeatAt()).isNotNull();
+        assertThat(telemetry.getLastHeartbeatAt()).isAfterOrEqualTo(telemetry.getStartedAt());
+        assertThat(telemetry.getLastHeartbeatAt()).isBeforeOrEqualTo(telemetry.getEndedAt());
+        assertThat(telemetry.getMetadata())
+                .containsKeys(
+                        "system.os",
+                        "system.os_version",
+                        "system.python_version",
+                        "system.sdk_version");
+        assertThat(logs.findByRunId(telemetry.getId(), 100))
+                .extracting("message", "level", "source")
+                .contains(
+                        tuple("자동 stdout 🐈\n", RunLogLevel.INFO, RunLogSource.STDOUT),
+                        tuple("자동 stderr\n", RunLogLevel.ERROR, RunLogSource.STDERR),
+                        tuple("partial output", RunLogLevel.INFO, RunLogSource.STDOUT));
+        assertThat(systemMetrics.findByRunId(telemetry.getId(), 100))
+                .hasSizeGreaterThanOrEqualTo(2)
+                .allSatisfy(
+                        metric -> {
+                            assertThat(metric.getCpuUtilization()).isBetween(0.0, 100.0);
+                            assertThat(metric.getRamUsed()).isNotNegative();
+                            assertThat(metric.getRamTotal()).isPositive();
+                            assertThat(metric.getRamUsed())
+                                    .isLessThanOrEqualTo(metric.getRamTotal());
+                            assertThat(metric.getElapsedTime()).isNotNegative();
+                            if (Boolean.parseBoolean(System.getenv("LABFLOW_EXPECT_GPU"))) {
+                                assertThat(metric.getGpus())
+                                        .isNotEmpty()
+                                        .allSatisfy(
+                                                gpu -> {
+                                                    assertThat(gpu.utilization())
+                                                            .isBetween(0.0, 100.0);
+                                                    assertThat(gpu.memoryUsed()).isNotNegative();
+                                                    assertThat(gpu.memoryTotal()).isPositive();
+                                                    assertThat(gpu.memoryUsed())
+                                                            .isLessThanOrEqualTo(gpu.memoryTotal());
+                                                });
+                            }
+                        });
+        Run idempotent = named(saved, "python-sdk-idempotent");
+        assertThat(idempotent.getStatus()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(parameters.findByRunId(idempotent.getId())).hasSize(1);
+        assertThat(metrics.findByRunId(idempotent.getId(), 100)).hasSize(2);
+        assertThat(logs.findByRunId(idempotent.getId(), 100))
+                .singleElement()
+                .satisfies(log -> assertThat(log.getMessage()).isEqualTo("persist exactly once"));
+        assertThat(texts.findByRunId(idempotent.getId(), 100)).hasSize(1);
+        assertThat(systemMetrics.findByRunId(idempotent.getId(), 100)).hasSize(1);
+        assertThat(idempotent.getLastHeartbeatAt()).isNotNull();
+        Run idempotentFailed = named(saved, "python-sdk-idempotent-failed");
+        assertThat(idempotentFailed.getStatus()).isEqualTo(RunStatus.FAILED);
+        assertThat(idempotentFailed.getError()).isEqualTo("lost failure acknowledgment");
         Run failed = named(saved, "python-sdk-failed");
         assertThat(failed.getStatus()).isEqualTo(RunStatus.FAILED);
         assertThat(failed.getError()).isEqualTo("ValueError: training failed");

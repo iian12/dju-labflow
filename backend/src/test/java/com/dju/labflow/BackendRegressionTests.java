@@ -10,6 +10,7 @@ import com.dju.labflow.auth.application.SignUpCommand;
 import com.dju.labflow.auth.application.token.TokenRefreshService;
 import com.dju.labflow.auth.domain.RefreshTokenHasher;
 import com.dju.labflow.auth.domain.RefreshTokenRepository;
+import com.dju.labflow.auth.domain.exception.EmailVerificationRequiredException;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
 import com.dju.labflow.project.key.application.IssueProjectApiKeyCommand;
@@ -97,7 +98,7 @@ class BackendRegressionTests {
     void pendingAccountCannotLogin() {
         User user = saveUser(1L, AccountStatus.PENDING_VERIFICATION);
         assertThatThrownBy(() -> authService.login(new LoginCommand(user.getEmail(), PASSWORD)))
-                .isInstanceOf(DisabledException.class);
+                .isInstanceOf(EmailVerificationRequiredException.class);
     }
 
     @ParameterizedTest

@@ -6,6 +6,7 @@ import com.dju.labflow.project.key.domain.ProjectApiKey;
 import com.dju.labflow.project.key.domain.ProjectApiKeyId;
 import com.dju.labflow.project.key.domain.ProjectApiKeyStatus;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
+import com.dju.labflow.project.key.exception.ProjectApiKeyNotFoundException;
 import com.dju.labflow.project.key.util.ProjectApiKeyGenerator;
 import com.dju.labflow.project.key.util.ProjectApiKeyHasher;
 import com.dju.labflow.project.project.domain.Project;
@@ -16,6 +17,7 @@ import com.dju.labflow.user.domain.UserId;
 import jakarta.transaction.Transactional;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
@@ -80,5 +82,44 @@ public class ProjectApiKeyService {
         projectApiKeyRepository.save(apiKey);
 
         return new IssueProjectApiKeyResult(apiKey.getId(), generated.rawKey());
+    }
+
+    public record KeyPage(
+            List<ProjectApiKey> items, int page, int size, long totalElements, long totalPages) {}
+
+    @Transactional
+    public KeyPage list(UserId requester, ProjectId projectId, int page, int size) {
+        if (page < 0 || size < 1 || size > 100)
+            throw new IllegalArgumentException("Invalid key page");
+        var project =
+                projectRepository.findById(projectId).orElseThrow(ProjectNotFoundException::new);
+        if (!project.getCreatedBy().equals(requester))
+            throw new AccessDeniedException("Only owner can read keys");
+        long count = projectApiKeyRepository.countByProjectId(projectId);
+        return new KeyPage(
+                projectApiKeyRepository.findByProjectId(projectId, page, size),
+                page,
+                size,
+                count,
+                (count + size - 1) / size);
+    }
+
+    @Transactional
+    public void revoke(UserId requester, ProjectId projectId, ProjectApiKeyId keyId) {
+        var project =
+                projectRepository
+                        .findByIdForUpdate(projectId)
+                        .orElseThrow(ProjectNotFoundException::new);
+        if (!project.getCreatedBy().equals(requester))
+            throw new AccessDeniedException("Only owner can revoke keys");
+        var key =
+                projectApiKeyRepository
+                        .findById(keyId)
+                        .filter(value -> value.getProjectId().equals(projectId))
+                        .orElseThrow(ProjectApiKeyNotFoundException::new);
+        if (!key.isRevoked()) {
+            key.revoke(clock.instant());
+            projectApiKeyRepository.update(key);
+        }
     }
 }

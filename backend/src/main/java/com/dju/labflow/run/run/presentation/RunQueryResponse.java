@@ -14,7 +14,8 @@ public record RunQueryResponse(
         RunStatus status,
         Instant startedAt,
         Instant endedAt,
-        String error) {
+        String error,
+        Instant lastHeartbeatAt) {
     public static RunQueryResponse from(Run run) {
         return new RunQueryResponse(
                 run.getId().value(),
@@ -24,6 +25,7 @@ public record RunQueryResponse(
                 run.getStatus(),
                 run.getStartedAt(),
                 run.getEndedAt(),
-                run.getError());
+                run.getError(),
+                run.getLastHeartbeatAt());
     }
 }

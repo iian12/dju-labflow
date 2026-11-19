@@ -18,6 +18,10 @@ public class UserService {
         this.userRepository = userRepository;
     }
 
+    public User get(UserId id) {
+        return userRepository.findById(id).orElseThrow(UserNotFoundException::new);
+    }
+
     @Transactional
     public void activateAccountStatus(UserId userId) {
         User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
