@@ -11,7 +11,7 @@ export default defineConfig({
         changeOrigin: true,
         cookieDomainRewrite: '',
         configure(proxy) {
-          // Match frontend-design's same-origin local cookie authentication setup.
+          // Use same-origin cookie authentication through the development proxy.
           proxy.on('proxyReq', request => request.removeHeader('origin'));
         },
       },

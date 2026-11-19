@@ -153,13 +153,5 @@ data/local/
 docker-compose.override.yml
 compose.override.yml
 
-# Test frontend dependencies and generated hosting/preview artifacts
-/frontend-design/node_modules/
-/frontend-design/.deploy/
-/frontend-design/.openai/
-/frontend-design/preview-*.png
-/frontend-design/*.tsbuildinfo
-/frontend-design/.vite/
-
 # Local external-access binaries, logs, and process state
 /.external-access/
