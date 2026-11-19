@@ -97,6 +97,14 @@ try {
   await sdk(`/runs/${created.runId}/logs`,{message:'SDK real log',level:'INFO',source:'USER'});
   await sdk(`/runs/${created.runId}/texts`,{key:'prediction',text:'SDK real text',step:4});
   await sdk(`/runs/${created.runId}/system-metrics`,{system:{cpuUtilization:25,ramUsed:1024,ramTotal:2048,gpus:[]},elapsedTime:1});
+  const payload = Buffer.from([0, 255, 128, 13, 10]);
+  const artifactName = "학습 결과.bin";
+  const uploaded = await context.request.post(`${base}/api/v1/sdk/runs/${created.runId}/artifacts?name=${encodeURIComponent(artifactName)}`, {
+    headers: {Authorization: `Bearer ${key}`, "X-Request-ID": crypto.randomUUID(), "Content-Type": "application/octet-stream"}, data: payload
+  });
+  assert.equal(uploaded.status(), 201);
+  const {artifactId} = parseJson(await uploaded.text()) as {artifactId: string};
+  const listPath = `/api/v1/projects/${createdId}/runs/${created.runId}/artifacts`;
   await sdk(`/runs/${created.runId}/complete`);
   await page.getByRole('navigation',{name:'프로젝트 화면'}).getByRole('link',{name:/실험 기록/}).click();
   await page.getByRole('link',{name:'SDK persisted run',exact:true}).waitFor();
@@ -105,7 +113,19 @@ try {
   await page.getByText('SDK real text',{exact:true}).waitFor();
   await page.getByRole('navigation',{name:'실험 상세'}).getByRole('link',{name:'System',exact:true}).click();
   await page.getByRole('cell',{name:'25%',exact:true}).waitFor();
+  await page.getByRole("navigation",{name:"실험 상세"}).getByRole("link",{name:"Artifacts", exact:true}).click();
+  const received = page.waitForEvent("download");
+  await page.getByRole("link", {name: artifactName + " 다운로드"}).click();
+  const artifactFile = await received;
+  assert.equal(artifactFile.suggestedFilename(), artifactName);
+  assert.deepEqual(await readFile((await artifactFile.path())!), payload);
   const anonymous=await browser.newContext();const shared=await anonymous.newPage();
+  const privatePath = `${base}/api/v1/projects/${project}/runs/${downloaded.run.runId}/artifacts`;
+  assert.equal((await anonymous.request.get(privatePath)).status(), 401);
+  assert.equal((await anonymous.request.get(privatePath + "/" + artifactId)).status(), 401);
+  assert.equal((await anonymous.request.get(base + listPath)).status(), 200);
+  assert.deepEqual(await (await anonymous.request.get(base + listPath + "/" + artifactId)).body(), payload);
+  assert.equal((await context.request.get(`${base}/api/v1/projects/${project}/runs/${created.runId}/artifacts/${artifactId}`)).status(), 404);
   await shared.goto(`${base}/#/projects/${createdId}/overview`);
   await shared.getByRole('img',{name:'loss 학습 곡선',exact:true}).waitFor();
   assert.equal(await shared.getByRole('button',{name:'프로젝트 수정',exact:true}).count(),0);await anonymous.close();

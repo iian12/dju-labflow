@@ -1,3 +1,4 @@
+import RunArtifacts from './RunArtifacts.tsx';
 import { useState } from 'react';
 import { api, projectPath } from './api.ts';
 import { useApi } from './useData.ts';
@@ -32,6 +33,7 @@ export default function LiveRunDetail({ projectId, runId, tab, scope, compare }:
     {['metrics','logs','texts','system-metrics'].includes(tab) && <RecordViewer key={`${runId}/${tab}`} embedded projectId={projectId} runId={runId} kind={recordKind(tab)}/>}
     {tab === 'parameters' && <><ErrorBox error={parameters.error} retry={parameters.refresh}/><section className="panel"><div className="section-title"><h2>학습 설정</h2></div><div className="live-table-scroll"><table className="keyvalues"><tbody>{parameters.data?.parameters.map(item => <tr key={item.key}><th>{item.key}</th><td>{item.value === '' ? '(빈 문자열)' : item.value}</td></tr>)}</tbody></table></div>{parameters.data && !parameters.data.parameters.length && <p className="live-empty">기록된 파라미터가 없습니다.</p>}</section></>}
     {tab === 'environment' && <section className="panel"><div className="section-title"><h2>실행 환경 및 메타데이터</h2></div><div className="live-table-scroll"><table className="keyvalues"><tbody>{Object.entries(run.data.metadata).map(([key, value]) => <tr key={key}><th>{key}</th><td>{value}</td></tr>)}</tbody></table></div>{!Object.keys(run.data.metadata).length && <p className="live-empty">기록된 메타데이터가 없습니다.</p>}<p className="live-chart-note">마지막 Heartbeat · {date(run.data.lastHeartbeatAt)}</p></section>}
+    {tab === 'artifacts' && <RunArtifacts key={path + scope} path={path} scope={scope}/>}
     {tab === 'artifacts' && <section className="panel prose"><h2>실험 기록 내보내기</h2><p>실제 저장된 파라미터, 지표, 로그, 텍스트, 시스템 지표를 JSON 파일로 내보냅니다.</p><ErrorBox error={error} retry={() => void exportRecords()}/><button disabled={busy} onClick={() => void exportRecords()}>{busy ? '기록을 모으는 중…' : '전체 기록 다운로드'}</button></section>}
   </>}</>;
 }
