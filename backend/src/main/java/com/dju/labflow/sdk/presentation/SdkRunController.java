@@ -2,6 +2,7 @@ package com.dju.labflow.sdk.presentation;
 
 import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.run.run.application.RunHeartbeatPolicy;
 import com.dju.labflow.run.run.application.RunRecordService;
 import com.dju.labflow.run.run.application.RunService;
 import com.dju.labflow.run.run.domain.RunId;
@@ -53,14 +54,17 @@ public class SdkRunController {
     private final SdkRequestService requestService;
     private final RunService runService;
     private final RunRecordService runRecordService;
+    private final RunHeartbeatPolicy heartbeats;
 
     public SdkRunController(
             RunService runService,
             RunRecordService runRecordService,
-            SdkRequestService requestService) {
+            SdkRequestService requestService,
+            RunHeartbeatPolicy heartbeats) {
         this.requestService = requestService;
         this.runService = runService;
         this.runRecordService = runRecordService;
+        this.heartbeats = heartbeats;
     }
 
     @PostMapping
@@ -96,7 +100,8 @@ public class SdkRunController {
     public ResponseEntity<RunResponse> get(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
             @Positive @PathVariable("runId") Long runId) {
-        return ResponseEntity.ok(RunResponse.from(runService.get(principal, RunId.of(runId))));
+        var run = runService.get(principal, RunId.of(runId));
+        return ResponseEntity.ok(RunResponse.from(run, heartbeats.status(run)));
     }
 
     @PutMapping("/{runId}/parameters")

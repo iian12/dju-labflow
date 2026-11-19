@@ -1,5 +1,6 @@
 package com.dju.labflow.run.run.presentation;
 
+import com.dju.labflow.run.run.application.RunHeartbeatPolicy;
 import com.dju.labflow.run.run.domain.RunPage;
 import java.util.List;
 import java.util.Map;
@@ -12,9 +13,11 @@ public record RunListResponse(
         long totalElements,
         long totalPages,
         Map<String, Long> counts) {
-    public static RunListResponse from(RunPage page) {
+    public static RunListResponse from(RunPage page, RunHeartbeatPolicy heartbeats) {
         return new RunListResponse(
-                page.items().stream().map(RunQueryResponse::from).toList(),
+                page.items().stream()
+                        .map(run -> RunQueryResponse.from(run, heartbeats.status(run)))
+                        .toList(),
                 page.page(),
                 page.size(),
                 page.totalElements(),
