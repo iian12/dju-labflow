@@ -5,7 +5,7 @@ import { dirname, extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Serve compiled assets only; development sources and environment files stay private.
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../frontend-design/dist')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../frontend/dist')
 const upstream = new URL(process.env.LABFLOW_BACKEND_URL ?? 'http://127.0.0.1:8080')
 if (upstream.protocol !== 'http:') throw new Error('The local backend must use HTTP')
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' }
