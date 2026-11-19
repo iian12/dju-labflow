@@ -1,0 +1,18 @@
+.records-app .record-picker{padding:20px 24px;margin-bottom:24px;display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.record-picker label{display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--secondary)}
+.record-picker select{min-width:240px;max-width:100%}
+.record-picker details{flex:1;min-width:240px;padding-top:4px}.record-picker summary{cursor:pointer;color:var(--secondary);font-size:13px;padding:8px 0}
+.record-picker form{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px}.record-picker input{max-width:230px;width:100%}
+.record-project-name{padding:20px 12px;color:var(--muted);overflow-wrap:anywhere;font-size:13px}
+.record-error{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 20px;margin:16px 0;border:1px solid var(--failed);border-radius:8px;color:var(--failed);overflow-wrap:anywhere}.record-error span{flex:1}.record-error a{text-decoration:underline}
+.record-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:20px 0}.record-controls strong{font-size:14px;font-weight:500}.record-controls small{margin-top:8px}.record-controls>div:last-child{display:flex;gap:8px;flex-wrap:wrap}
+.record-range{font-size:12px;margin:12px 0 20px}.record-empty{padding:40px 24px;text-align:center;color:var(--muted)}
+.record-table-scroll{overflow:auto}.record-log-filter{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}.record-log-filter label{display:flex;gap:8px;align-items:center;font-size:12px}.record-log-filter input{min-width:240px}
+.record-console>div{display:grid;grid-template-columns:160px 130px minmax(220px,1fr);gap:16px;white-space:normal;padding:8px 0}.record-console pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;line-height:1.8}.record-console time,.record-console b{font-size:11px}
+.record-texts{display:grid;gap:16px}.record-texts pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;font-size:13px}.record-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px}.record-plots svg{width:100%;display:block;padding:0 12px 12px}.record-plots text{font:10px var(--app-font);fill:var(--muted)}
+@media(max-width:720px){.record-controls>div:last-child{width:100%}.record-controls button{flex:1;font-size:12px}.record-console>div{grid-template-columns:1fr 1fr;gap:8px}.record-console pre{grid-column:1/-1}.records-app .record-picker{padding:16px}.record-picker>label,.record-picker details,.record-picker label,.record-picker input{width:100%;max-width:none}.record-picker select{min-width:0}.record-plots{grid-template-columns:1fr}}
+
+.record-console{max-height:65vh;min-height:240px;overflow:auto;background:var(--surface);color:var(--ink)}
+.record-console pre{color:var(--ink)}.record-console time{color:var(--muted)}.record-console b{color:var(--complete)}.record-console .ERROR pre,.record-console .ERROR b{color:var(--failed)}
+
+.records-app .record-controls button.primary,.records-app .record-picker button.primary{background:var(--action);border-color:var(--action);color:#fff}

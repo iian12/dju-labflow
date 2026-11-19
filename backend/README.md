@@ -55,6 +55,7 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/api/v1/auth/csrf` | CSRF 쿠키 초기화. 로그인 불필요 |
+| GET | `/api/v1/auth/me` | 현재 로그인한 사용자의 ID·이름·이메일 (200) |
 | POST | `/api/v1/auth/sign-up` | 미인증 회원 생성 및 코드 발송 요청 (201) |
 | POST | `/api/v1/auth/login` | 이메일/비밀번호 인증 후 HttpOnly 인증 쿠키 발급 (204) |
 | POST | `/api/v1/auth/refresh` | refresh 쿠키와 CSRF로 토큰 회전 (204) |
@@ -62,14 +63,20 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | POST | `/api/v1/auth/email-verifications/verify` | 코드 검증 후 계정 활성화 (204) |
 | POST | `/api/v1/auth/email-verifications/resend` | 코드 재발송 요청 (202) |
 | POST | `/api/v1/project-api-keys/issue/{projectId}` | 프로젝트 소유자의 API 키 발급 |
+| GET | `/api/v1/projects/{projectId}/api-keys?page=0&size=20` | 소유자의 API 키 목록. 원문/해시 제외 (200) |
+| DELETE | `/api/v1/projects/{projectId}/api-keys/{keyId}` | 소유자의 API 키 폐기. 반복 폐기 204 |
 | POST | `/api/v1/projects` | 개인 프로젝트 생성 (201) |
 | GET | `/api/v1/projects?page=0&size=20` | 내 프로젝트 페이지 (200) |
 | GET | `/api/v1/projects/{projectId}` | 공개 범위를 적용한 프로젝트 상세 (200) |
 | PUT | `/api/v1/projects/{projectId}` | 소유자의 전체 정보 수정, 조회 version 필수 (204) |
 | DELETE | `/api/v1/projects/{projectId}?version=0` | 소유자의 프로젝트 및 종속 데이터 삭제 (204) |
 | GET | `/api/v1/projects/{projectId}/runs?page=0&size=20` | 웹 실행 목록 및 프로젝트 전체 상태 집계 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/compare?runIds=123,456&metricKey=val_accuracy` | Run 2~4개의 곡선·공통 Step·기준 대비 차이·파라미터 비교 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/summaries?runIds=123,456` | 최대 100개 Run의 최신 지표·마지막 Step 일괄 조회 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/{runId}/metric-series?metricKey=loss` | 단일 Run의 전체 구간 지표 곡선과 최신값 (200) |
 | GET | `/api/v1/projects/{projectId}/runs/{runId}` | 웹 실행 상세 (200) |
 | GET | `/api/v1/projects/{projectId}/runs/{runId}/records?limit=1000` | 파라미터·메트릭·로그·텍스트·시스템 지표 조회 (200) |
+| GET | `/api/v1/projects/{projectId}/runs/{runId}/records/{kind}?limit=200&latest=true` | 기록 종류별 최신·이전·이후 커서 페이지 (200) |
 | POST | `/api/v1/sdk/runs` | 실행 생성. ID와 Location 반환 (201) |
 | GET | `/api/v1/sdk/runs/{runId}` | 실행 상태·메타데이터 조회 (200) |
 | PUT | `/api/v1/sdk/runs/{runId}/parameters` | 불변 파라미터 추가, 같은 키/값 재전송 허용 (204) |
@@ -117,13 +124,71 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 
 `ProjectHttpTests`는 실제 JWT·CSRF·보안 필터와 H2에서 CRUD, 공개 범위, 개인 목록, 소유자 권한, 클라이언트 버전 충돌, 종속 데이터 삭제·롤백·동시성을 확인합니다. 테스트 프로필은 로컬 Gmail 설정과 분리하여 외부 메일을 발송하지 않습니다.
 
+### 웹 Run 비교 API
+
+`GET /api/v1/projects/{projectId}/runs/compare`는 `frontend`의 Run 비교에 필요한 데이터를 한 번에 반환합니다. 프로젝트 조회와 같은 공개 정책을 적용합니다. PUBLIC은 익명 조회 가능, PRIVATE은 소유자만 가능하며 다른 프로젝트 또는 없는 Run을 포함하면 전체 요청을 404로 거부합니다. SDK Bearer 키는 웹 사용자의 인증을 대체하지 않습니다.
+
+| 쿼리 | 설명 |
+| --- | --- |
+| `runIds` | 같은 프로젝트의 서로 다른 Run 2~4개. `runIds=123,456` 또는 반복 파라미터 지원. 응답도 선택 순서 유지 |
+| `metricKey` | SDK에 기록한 실제 지표 이름(예: `val_accuracy`, `recall_at_10`, `val_loss`). 필수, 1~100자 |
+| `baselineRunId` | 선택한 Run 중 기준 Run. 생략하면 첫 Run |
+| `differencesOnly` | true이면 파라미터 비교 행 중 값이 다른 행만 반환. 기본 false |
+| `maxPoints` | Run별 차트 점 수 상한. 기본 500, 2~1000 |
+
+예: `/api/v1/projects/100/runs/compare?runIds=201,202&metricKey=val_accuracy&baselineRunId=202&differencesOnly=true&maxPoints=500`
+
+응답의 `runs`는 각 Run의 ID·이름·상태·시작/종료 시각과 다음 데이터를 포함합니다.
+
+- `latestMetric`: 선택 지표의 전체 기록 중 `recordedAt`, ID 순으로 가장 최근 기록. step이 없는 기록도 포함합니다.
+- `lastStep`: 선택 지표에 실제로 기록된 가장 큰 Step. `latestMetric.step`은 늦게 도착한 이전 Step 기록 등으로 이 값과 다를 수 있습니다.
+- `commonStepMetric`: 모든 선택 Run에 선택 지표가 실제로 존재하는 **가장 큰 공통 Step**의 값. 기록이 없는 Step을 보간하거나 이전 값으로 채우지 않습니다.
+- `deltaFromBaseline`: 공통 Step에서 현재 Run 값에서 기준 Run 값을 뺀 수치. 기준 Run은 0이며 지표의 좋고 나쁨과 무관한 부호입니다.
+- `series`: Step 오름차순의 `points`, 중복 Step 제거 후 원본 점 수 `totalPoints`, 축약 여부 `sampled`. 각 점에는 ID·Step·값·epoch·경과 시간·기록 시각이 있습니다.
+
+최상위 `commonStep`이 null이면 모든 Run의 공통값과 차이도 null입니다. 선택 지표가 없는 Run은 `latestMetric`/`lastStep`이 null이고 곡선은 빈 배열입니다. Step 없는 지표는 최신값에만 포함합니다. `availableMetrics`는 선택 Run들이 기록한 지표 이름의 합집합으로 지표 선택 메뉴에 사용할 수 있습니다. 알 수 없는 지표를 요청하면 값을 만들어내지 않고 빈 결과를 반환합니다.
+
+같은 Run/지표/Step에 여러 기록이 있으면 `recordedAt`이 큰 기록, 시각까지 같으면 ID가 큰 기록을 사용합니다. 차트는 이 기준으로 중복을 제거한 뒤 전체 Step 범위의 실제 기록을 일정 순위 간격으로 선택하고 첫 점과 마지막 점을 보존합니다. 최대 `maxPoints`개이며 보간 값은 생성하지 않습니다. 전체 이력을 JVM에 로드하지 않고 DB에서 축약합니다. 공통 Step·최신값·차이는 차트 샘플과 독립적으로 원본 전체에서 계산하므로 샘플에 없는 공통 Step도 정확히 비교합니다. 하나의 REPEATABLE_READ 트랜잭션으로 처리합니다.
+
+최상위 `parameters`는 `{key, values, different}` 행 배열입니다. `values`는 응답 `runs`와 같은 순서이며 미설정 값은 null입니다. 빈 문자열과 미설정 값은 다르게 취급합니다. 키 합집합을 이름순으로 정렬하며 `differencesOnly`는 이 행 배열에만 적용됩니다. 중복 Run, 범위를 벗어난 선택 개수/점 수, 선택에 없는 기준 Run 등은 `400 INVALID_INPUT`입니다.
+
+`frontend`의 비교 화면은 이 API의 응답으로 곡선·공통값·차이·파라미터를 표시합니다. 기존 테이블을 사용하며 DB 마이그레이션은 필요하지 않습니다. `RunComparisonHttpTests`가 실제 HTTP·JWT·H2에서 비교, 기준 변경, 누락/희소 Step, 중복 기록, 1,501점 이력의 샘플링과 권한·입력 오류를 검증합니다.
+
+### Studio 전체 API 연결
+
+`frontend`는 세션, 프로젝트 CRUD, Run 목록·개요·비교·상세, 기록 커서 탐색, API 키 발급·목록·폐기와 기록 내보내기를 실제 API로 처리합니다. 빈 데이터나 서버 오류를 샘플 데이터로 대체하지 않습니다. 최신 프런트에는 여기 추가한 API가 필요하므로 백엔드를 다시 빌드/실행합니다.
+
+`GET /api/v1/auth/me`는 현재 사용자만 반환하고 쿠키를 JSON에 노출하지 않습니다. 만료된 access 쿠키는 공통 프런트 API 클라이언트가 CSRF/refresh로 한 번 갱신합니다. 키 관리 API는 PUBLIC 프로젝트여도 소유자만 사용할 수 있고 원문/해시는 목록에 포함하지 않습니다. 폐기는 프로젝트 잠금과 기존 키 버전 검사를 적용하며 폐기한 키의 SDK 요청은 거부합니다. 키 목록은 0 기반 페이지, size 1~100입니다.
+
+Run 요약은 같은 프로젝트의 서로 다른 Run 1~100개를 받아 선택 순서로 각 Run의 `metrics`와 `lastStep`을 반환합니다. `metrics`는 지표별 시각/ID 기준 최신 기록이며 마지막 Step은 전체 지표 기록의 최대 Step입니다. SQL 윈도 함수로 최신 기록만 선택하므로 전체 이력을 애플리케이션 메모리에 로드하지 않습니다. 다른 프로젝트의 Run이나 없는 Run을 포함하면 404입니다. 단일 곡선은 비교 API와 같은 중복 Step 제거·전체 구간 샘플링 규칙과 `maxPoints` 상한을 사용합니다.
+
+`LABFLOW_STUDIO_NODE`에 Node 실행 파일 경로를 설정하고 `StudioBrowserIntegrationTests`를 실행하면 임시 HTTP/H2 서버와 실제 `frontend` 브라우저에서 로그인·세션 갱신·프로젝트 저장/삭제·키 발급/폐기·SDK 기록·비교·공개 조회·JSON 다운로드·로그아웃을 검증합니다. 별도 `LABFLOW_RECORDS_NODE`의 `RecordCursorBrowserIntegrationTests`는 1,000개 초과 기록 탐색과 최신 갱신을 검증합니다. 새 DB 컬럼/마이그레이션은 없습니다.
+
 ### SDK Run API
 
 웹 화면은 `run/run/presentation/RunQueryController`의 사용자용 조회 API를 사용합니다. `RunQueryService`는 먼저 프로젝트 공개 정책을 확인하고 Run이 URL의 프로젝트에 속하는지 검사합니다. PUBLIC 프로젝트의 실행·기록은 비로그인 조회가 가능하고 PRIVATE은 소유자만 읽을 수 있습니다. 다른 프로젝트 Run ID를 섞으면 404입니다. SDK 키는 웹 사용자 인증을 대체하지 않습니다.
 
-실행 목록은 생성 시각/ID 내림차순, 기본 20개/최대 100개의 페이지이며 전체 `counts.RUNNING/COMPLETED/FAILED`를 함께 반환합니다. records는 각 기록 종류를 시각/ID 오름차순으로 최대 limit개(기본/최대 1000) 반환하고 파라미터는 전체(최대 100개)를 반환합니다. 현재 시계열 커서 페이지네이션은 없으므로 상한 도달 시 프론트에서 제한을 표시합니다. 원문, 사용자 정의 metric 이름과 숫자 값, 선택적인 step/epoch/기록 시각을 보존합니다. 새 테이블이나 스키마 변경은 없습니다.
+실행 목록은 생성 시각/ID 내림차순, 기본 20개/최대 100개의 페이지이며 전체 `counts.RUNNING/COMPLETED/FAILED`를 함께 반환합니다. records는 각 기록 종류를 시각/ID 오름차순으로 최대 limit개(기본/최대 1000) 반환하고 파라미터는 전체(최대 100개)를 반환합니다. `latest=true`이면 종류별 최근 limit개를 가져와 시간/ID 오름차순으로 반환합니다. 종류별 전체 탐색은 아래 커서 API를 사용합니다. 원문, 사용자 정의 metric 이름과 숫자 값, 선택적인 step/epoch/기록 시각을 보존합니다. 새 테이블이나 스키마 변경은 없습니다.
 
-로컬 `frontend-design` 폴더가 있으면 `http://127.0.0.1:5174/`에서 실제 로그인·프로젝트·SDK 연결·실험 기록 화면을 사용합니다. 해당 폴더는 기존처럼 Git에서 제외하며 API 테스트 도구는 `#/api-test`에 유지합니다. `FrontendBrowserIntegrationTests`는 `LABFLOW_FRONTEND_NODE`를 지정한 경우만 이 로컬 앱으로 실제 브라우저 테스트를 수행합니다.
+`frontend/`의 `http://127.0.0.1:5181/#/records`에서 실제 프로젝트와 Run을 선택해 기록을 조회합니다. 상단의 **실험 기록** 링크로도 진입합니다. 최신 페이지는 5초마다 갱신하며 과거 페이지를 탐색하는 동안에는 자동 갱신하지 않습니다. 기존 `frontend-design/`의 화면과 API 테스트 도구는 별도로 유지됩니다.
+
+기록 커서 API:
+
+```text
+GET /api/v1/projects/{projectId}/runs/{runId}/records/{kind}?latest=true&limit=200
+GET /api/v1/projects/{projectId}/runs/{runId}/records/{kind}?before={beforeCursor}&limit=200
+GET /api/v1/projects/{projectId}/runs/{runId}/records/{kind}?after={afterCursor}&limit=200
+```
+
+`kind`는 `metrics`, `logs`, `texts`, `system-metrics`입니다. `limit`은 기본 200/최대 1,000이며 전체 기록 수의 제한이 아니라 한 페이지의 크기입니다. 옵션 없이 조회하면 첫 페이지를 반환합니다. `latest=true`, `before`, `after`는 동시에 사용할 수 없습니다. 파라미터는 최대 100개의 불변 설정이므로 기존 묶음 조회로 전체를 읽습니다.
+
+응답은 `items`, `limit`, `hasMore`, `beforeCursor`, `afterCursor`, `nextCursor`입니다. `items`는 조회 방향과 무관하게 `(recordedAt, id)` 오름차순입니다. `beforeCursor`는 첫 항목 이전, `afterCursor`는 마지막 항목 이후를 조회할 때 사용합니다. `hasMore`와 `nextCursor`는 **현재 조회 방향** 기준이며, 최신/이전 조회는 더 과거의 기록, 처음/이후 조회는 더 새로운 기록을 가리킵니다. `nextCursor`는 `hasMore=false`일 때 null입니다. 빈 페이지는 모든 커서가 null이므로 증분 조회 호출자는 기존 `after` 위치를 보관해 다음 폴링에 재사용합니다.
+
+커서는 버전·Run·기록 종류와 시간/ID 위치를 포함하는 불투명한 URL-safe 문자열입니다. 다른 Run/종류의 커서, 잘못된 형식, 잘못된 limit·옵션 조합은 400입니다. 커서는 권한을 부여하지 않으며 매번 PUBLIC/PRIVATE와 Run 소속을 확인합니다. 동일한 기록 시각도 ID로 구분하므로 페이지 경계에서 같은 기록을 반복하지 않습니다. 기존 `(run_id, recorded_at, id)` 인덱스를 사용하는 keyset 조회이며 별도 DDL은 필요하지 않습니다.
+
+최신은 수신 순서가 아니라 **기록 시각** 기준입니다. SDK가 뒤늦게 과거 `recordedAt`을 보내면 해당 기록은 과거 페이지에 위치하며, 현재 `after` 위치보다 앞에 추가된 기록은 그 이후 조회에 포함되지 않습니다. 최신 조회는 고정된 스냅샷을 보장하지 않으며 새로운 기록을 반영합니다.
+
+`RunQueryHttpTests`는 1,005개 기록, 동일 시각, 4종류 양방향 탐색, 최신/증분 조회와 잘못된 커서·접근 권한을 검사합니다. `RecordCursorBrowserIntegrationTests`는 `LABFLOW_RECORDS_NODE`에 Node 실행 파일의 절대 경로를 지정하면 실제 `frontend/` + Spring Boot/H2 + Edge로 이전/다음 이동과 최신 자동 갱신을 검증합니다.
 
 SDK 경로는 `Authorization: Bearer <project-api-key>`만 사용합니다. JWT 쿠키와 CSRF 토큰은 필요하지 않으며 사용자 JWT를 Bearer 값으로 넣어도 인증되지 않습니다. Swagger의 Authorize에서 `projectApiKey`에 원문 키를 입력할 수 있습니다. SDK 작업의 프로젝트와 소유자는 인증된 키에서 결정되며 요청 파라미터로 변경할 수 없습니다. 같은 프로젝트의 다른 유효한 키는 같은 실행에 접근할 수 있습니다.
 
@@ -275,11 +340,13 @@ API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습
 - `run/text`: `text()`용 이름·본문·선택 step을 가진 실험 텍스트 데이터
 - `run/artifact`: 결과 파일의 이름·종류·저장 위치·예약/실제 크기·선택 SHA-256과 업로드 수명주기. `RunArtifactCommand`, 도메인, Mapper와 JPA 저장소를 분리합니다.
 
-각 하위 패키지는 `domain`, `domain/repository`, `application`, `infrastructure/persistence`를 사용합니다. 저장 모델은 `AssignedIdEntity`를 사용하며 도메인의 `create/restore`, Mapper, JPA 저장소와 저장소 구현을 구분합니다. 기록은 추가 전용이며 일반 조회는 최대 1,000개로 제한합니다. 기록 시각/ID 순으로 첫 limit개를 반환하며 커서 페이지네이션은 아직 제공하지 않습니다.
+각 하위 패키지는 `domain`, `domain/repository`, `application`, `infrastructure/persistence`를 사용합니다. 저장 모델은 `AssignedIdEntity`를 사용하며 도메인의 `create/restore`, Mapper, JPA 저장소와 저장소 구현을 구분합니다. 기록은 추가 전용이며 일반 조회는 최대 1,000개로 제한합니다. 기존 묶음 조회는 처음/최근 limit개를 반환하며, 웹 시계열은 종류별 커서 API로 전체 기록을 탐색할 수 있습니다.
 
 Artifact는 생성 시 `UPLOADING`이며 예약 크기와 실제 크기가 일치하고 업로드 기한 안에 검증되어야 `READY`로 전환합니다. 같은 크기/체크섬의 완료 재요청은 원래 업로드 시각을 유지하고, 다른 결과로 덮어쓰기는 거부합니다. 실패 시 `FAILED`, 삭제 요청 시 `DELETING`으로 전환합니다. 일반 파일 목록에는 `findReadyByRunId()`를 사용합니다. 전체 상태 조회는 `findByRunId()`이며 두 조회 모두 생성 시각/ID 오름차순, 최대 1,000개입니다. `save()`는 신규 INSERT, `update()`는 도메인 조회 버전과 JPA `@Version`을 검사하는 상태 변경입니다.
 
-같은 Run의 `clientRequestId`와 저장 위치 `(bucket, objectKey)`는 각각 유니크합니다. 파일명은 중복될 수 있습니다. 재시도 조회는 `findByRunIdAndClientRequestId()`를 제공하지만, 예약 요청 내용 비교와 동시 INSERT 충돌 처리는 향후 업로드 서비스에서 수행해야 합니다. 이 모듈은 도메인/영속성 기반이며 HTTP API, 스토리지 어댑터, 파일 검증 작업, 용량 정책/사용량 예약, 정리 작업은 아직 연결하지 않았습니다. 최대 크기는 도메인에 고정하지 않고 업로드 서비스의 설정 정책에서 검사해야 합니다. 프로젝트 삭제에는 Artifact 메타데이터 삭제를 포함하며, 실제 스토리지 연동 시 객체 삭제 재시도 작업을 같은 트랜잭션에서 기록하는 처리를 추가해야 합니다.
+SDK는 실행 중인 Run의 `POST /api/v1/sdk/runs/{runId}/artifacts?name=...&kind=OTHER`로 바이너리를 전송합니다. Content-Length와 X-Request-ID가 필요하며 성공 응답에는 artifactId가 들어 있습니다. 같은 요청 ID와 동일한 이름·종류·내용은 기존 ID를 반환합니다. 다운로드는 같은 프로젝트 키로 `GET /api/v1/sdk/runs/{runId}/artifacts/{artifactId}`를 호출하며 종료한 Run도 지원합니다.
+
+파일은 백엔드 작업 디렉터리 기준 `./data/artifacts`에 저장합니다. `labflow.artifacts.directory`, `labflow.artifacts.max-file-bytes`(기본 1 GiB), `labflow.artifacts.max-project-bytes`(기본 20 GiB)로 설정합니다. 업로드는 단일 HTTP 요청으로 스트리밍하며 프로젝트 잠금으로 용량 검사를 직렬화합니다. 프로젝트 삭제 커밋 후 로컬 파일 삭제를 시도합니다.
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
