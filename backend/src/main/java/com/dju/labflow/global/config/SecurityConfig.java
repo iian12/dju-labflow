@@ -125,8 +125,12 @@ public class SecurityConfig {
                                         .requestMatchers(
                                                 HttpMethod.GET,
                                                 "/api/v1/projects/{projectId}/runs",
+                                                "/api/v1/projects/{projectId}/runs/compare",
+                                                "/api/v1/projects/{projectId}/runs/summaries",
+                                                "/api/v1/projects/{projectId}/runs/{runId}/metric-series",
                                                 "/api/v1/projects/{projectId}/runs/{runId}",
-                                                "/api/v1/projects/{projectId}/runs/{runId}/records")
+                                                "/api/v1/projects/{projectId}/runs/{runId}/records",
+                                                "/api/v1/projects/{projectId}/runs/{runId}/records/{kind}")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())

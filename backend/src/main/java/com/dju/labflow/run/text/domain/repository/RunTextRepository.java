@@ -1,5 +1,7 @@
 package com.dju.labflow.run.text.domain.repository;
 
+import com.dju.labflow.run.run.domain.RecordPageQuery;
+import com.dju.labflow.run.run.domain.RecordSlice;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.text.domain.RunText;
 import java.util.List;
@@ -10,4 +12,7 @@ public interface RunTextRepository {
 
     /** 기록 시각과 ID 오름차순으로 최대 limit개를 조회한다(1~1000). */
     List<RunText> findByRunId(RunId runId, int limit);
+
+    /** 시간/ID 복합 커서 기반의 양방향 제한 조회. */
+    RecordSlice<RunText> findPage(RunId runId, RecordPageQuery query);
 }

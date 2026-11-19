@@ -1,5 +1,7 @@
 package com.dju.labflow.run.systemmetric.infrastructure.persistence;
 
+import com.dju.labflow.run.run.domain.RecordPageQuery;
+import com.dju.labflow.run.run.domain.RecordSlice;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.RunValidation;
 import com.dju.labflow.run.systemmetric.domain.RunSystemMetric;
@@ -38,5 +40,31 @@ public class RunSystemMetricRepositoryImpl implements RunSystemMetricRepository 
                 .stream()
                 .map(RunSystemMetricMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public RecordSlice<RunSystemMetric> findPage(RunId runId, RecordPageQuery query) {
+        Objects.requireNonNull(runId, "Run ID must not be null");
+        Objects.requireNonNull(query, "Page query must not be null");
+        var page = PageRequest.of(0, query.limit() + 1);
+        var position = query.position();
+        List<RunSystemMetricEntity> fetched;
+        if (position == null) {
+            fetched =
+                    query.backwards()
+                            ? runSystemMetricJpaRepository.findByRunIdOrderByRecordedAtDescIdDesc(
+                                    runId.value(), page)
+                            : runSystemMetricJpaRepository.findByRunIdOrderByRecordedAtAscIdAsc(
+                                    runId.value(), page);
+        } else {
+            fetched =
+                    query.backwards()
+                            ? runSystemMetricJpaRepository.findBefore(
+                                    runId.value(), position.recordedAt(), position.id(), page)
+                            : runSystemMetricJpaRepository.findAfter(
+                                    runId.value(), position.recordedAt(), position.id(), page);
+        }
+        return RecordSlice.from(
+                fetched.stream().map(RunSystemMetricMapper::toDomain).toList(), query);
     }
 }

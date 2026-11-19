@@ -2,6 +2,8 @@ package com.dju.labflow.run.log.infrastructure.persistence;
 
 import com.dju.labflow.run.log.domain.RunLog;
 import com.dju.labflow.run.log.domain.repository.RunLogRepository;
+import com.dju.labflow.run.run.domain.RecordPageQuery;
+import com.dju.labflow.run.run.domain.RecordSlice;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.RunValidation;
 import java.util.List;
@@ -36,5 +38,30 @@ public class RunLogRepositoryImpl implements RunLogRepository {
                 .stream()
                 .map(RunLogMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public RecordSlice<RunLog> findPage(RunId runId, RecordPageQuery query) {
+        Objects.requireNonNull(runId, "Run ID must not be null");
+        Objects.requireNonNull(query, "Page query must not be null");
+        var page = PageRequest.of(0, query.limit() + 1);
+        var position = query.position();
+        List<RunLogEntity> fetched;
+        if (position == null) {
+            fetched =
+                    query.backwards()
+                            ? runLogJpaRepository.findByRunIdOrderByRecordedAtDescIdDesc(
+                                    runId.value(), page)
+                            : runLogJpaRepository.findByRunIdOrderByRecordedAtAscIdAsc(
+                                    runId.value(), page);
+        } else {
+            fetched =
+                    query.backwards()
+                            ? runLogJpaRepository.findBefore(
+                                    runId.value(), position.recordedAt(), position.id(), page)
+                            : runLogJpaRepository.findAfter(
+                                    runId.value(), position.recordedAt(), position.id(), page);
+        }
+        return RecordSlice.from(fetched.stream().map(RunLogMapper::toDomain).toList(), query);
     }
 }
