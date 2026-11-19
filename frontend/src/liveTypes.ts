@@ -1,7 +1,8 @@
 export type Session = { userId: string; name: string; email: string };
 export type LiveProject = { projectId: string; name: string; description: string | null; createdBy: string; visibility: 'PUBLIC' | 'PRIVATE'; createdAt: string; updatedAt: string | null; version: number | string };
 export type Status = 'RUNNING' | 'COMPLETED' | 'FAILED';
-export type LiveRun = { runId: string; projectId: string; name: string; status: Status; metadata: Record<string, string>; startedAt: string; endedAt: string | null; error: string | null; lastHeartbeatAt: string | null };
+export type ConnectionStatus = 'WAITING' | 'CONNECTED' | 'DISCONNECTED' | 'INACTIVE';
+export type LiveRun = { runId: string; projectId: string; name: string; status: Status; connectionStatus?: ConnectionStatus; metadata: Record<string, string>; startedAt: string; endedAt: string | null; error: string | null; lastHeartbeatAt: string | null };
 export type Point = { id: string; key?: string; value: number; step: string | number | null; epoch: number | null; elapsedTime: number | null; recordedAt: string };
 export type Summary = { runId: string; lastStep: string | number | null; metrics: Point[] };
 export type RunData = { items: LiveRun[]; total: number; counts: Record<Status, number>; summaries: Record<string, Summary>; metrics: string[] };

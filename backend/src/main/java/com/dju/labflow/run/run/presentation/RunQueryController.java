@@ -19,9 +19,11 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Project Runs", description = "웹 화면의 프로젝트별 실행·기록 조회")
 public class RunQueryController {
     private final RunQueryService service;
+    private final RunHeartbeatPolicy heartbeats;
 
-    public RunQueryController(RunQueryService service) {
+    public RunQueryController(RunQueryService service, RunHeartbeatPolicy heartbeats) {
         this.service = service;
+        this.heartbeats = heartbeats;
     }
 
     @GetMapping
@@ -32,7 +34,8 @@ public class RunQueryController {
             @RequestParam(defaultValue = "0") @PositiveOrZero int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         return RunListResponse.from(
-                service.list(user, ProjectId.of(projectId), new RunListQuery(page, size)));
+                service.list(user, ProjectId.of(projectId), new RunListQuery(page, size)),
+                heartbeats);
     }
 
     @GetMapping("/{runId}")
@@ -41,7 +44,8 @@ public class RunQueryController {
             @Parameter(hidden = true) @CurrentUserId(required = false) @Nullable UserId user,
             @PathVariable @Positive Long projectId,
             @PathVariable @Positive Long runId) {
-        return RunQueryResponse.from(service.get(user, ProjectId.of(projectId), RunId.of(runId)));
+        var run = service.get(user, ProjectId.of(projectId), RunId.of(runId));
+        return RunQueryResponse.from(run, heartbeats.status(run));
     }
 
     @GetMapping("/{runId}/records")

@@ -2,6 +2,9 @@
 .live-error span{flex:1;min-width:120px;overflow-wrap:anywhere}.live-error a{color:var(--accent);text-decoration:underline}
 .live-empty{padding:24px;color:var(--muted);font-size:13px;line-height:1.8}
 .live-chart-note{padding:12px 24px;color:var(--muted);font-size:11px}
+.badge.DISCONNECTED{background:#fff4dc;color:#8a5700;white-space:nowrap}.badge.DISCONNECTED i{background:currentColor}
+.connection-notice{padding:18px 20px;margin-bottom:24px;border:1px solid #e7c788;border-radius:8px;background:#fffbf2;color:#795000}.connection-notice p{color:inherit;font-size:13px;margin-top:6px;overflow-wrap:anywhere}
+.run-actions{display:flex;flex-wrap:wrap;gap:8px}.modal .run-actions{margin-top:20px;justify-content:flex-end}
 .live-table-scroll{overflow:auto}.live-table-scroll td{white-space:pre-wrap;max-width:320px;overflow-wrap:anywhere}
 .live-info{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;margin:24px 0;font-size:13px;line-height:1.7}
 .live-info dt{color:var(--muted)}.live-info dd{margin:0;overflow-wrap:anywhere}

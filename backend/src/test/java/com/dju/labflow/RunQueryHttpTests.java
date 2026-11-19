@@ -3,6 +3,7 @@ package com.dju.labflow;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
@@ -54,6 +55,140 @@ class RunQueryHttpTests {
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager transactions;
     final List<UserId> owners = new ArrayList<>();
+
+    @Test
+    void disconnectedRunStaysRunningAndHeartbeatReconnectsTheSameRun() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(1, 1L, 1.0, Map.of("loss", 0.25), null));
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status ->
+                                em.createQuery(
+                                                "update RunEntity r set r.startedAt = :at where r.id = :id")
+                                        .setParameter("at", Instant.now().minusSeconds(300))
+                                        .setParameter("id", f.run().value())
+                                        .executeUpdate());
+        String detail = base(f) + "/" + f.run().value();
+        mvc.perform(get(detail))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connectionStatus").value("DISCONNECTED"))
+                .andExpect(jsonPath("$.status").value("RUNNING"))
+                .andExpect(jsonPath("$.endedAt").isEmpty())
+                .andExpect(jsonPath("$.error").isEmpty());
+        mvc.perform(get(base(f)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].connectionStatus").value("DISCONNECTED"))
+                .andExpect(jsonPath("$.counts.RUNNING").value(1));
+        mvc.perform(
+                        get("/api/v1/sdk/runs/" + f.run().value())
+                                .header("Authorization", "Bearer " + f.key()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connectionStatus").value("DISCONNECTED"));
+        mvc.perform(
+                        post("/api/v1/sdk/runs/" + f.run().value() + "/heartbeat")
+                                .header("Authorization", "Bearer " + f.key()))
+                .andExpect(status().isNoContent());
+        mvc.perform(get(detail))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connectionStatus").value("CONNECTED"))
+                .andExpect(jsonPath("$.status").value("RUNNING"));
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(2, 2L, 2.0, Map.of("loss", 0.1), null));
+        mvc.perform(get(detail + "/records"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.length()").value(2));
+    }
+
+    @Test
+    void ownerCanManuallyStopRunWithCsrfAndRetryWithoutChangingEndTime() throws Exception {
+        var f = fixture(ProjectVisibility.PRIVATE);
+        String detail = base(f) + "/" + f.run().value();
+        var csrf =
+                mvc.perform(get("/api/v1/auth/csrf"))
+                        .andReturn()
+                        .getResponse()
+                        .getCookie("XSRF-TOKEN");
+        mvc.perform(
+                        post(detail + "/stop")
+                                .cookie(cookie(f.owner()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isNoContent());
+        var ended = runs.get(f.principal(), f.run()).getEndedAt();
+        mvc.perform(
+                        post(detail + "/stop")
+                                .cookie(cookie(f.owner()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isNoContent());
+        assertThat(runs.get(f.principal(), f.run()).getEndedAt()).isEqualTo(ended);
+        mvc.perform(get(detail).cookie(cookie(f.owner())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.error").value(RunManagementService.STOP_REASON))
+                .andExpect(jsonPath("$.connectionStatus").value("INACTIVE"));
+        mvc.perform(
+                        post("/api/v1/sdk/runs/" + f.run().value() + "/heartbeat")
+                                .header("Authorization", "Bearer " + f.key()))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void manualStopRequiresLoginCsrfAndOwnerEvenForPublicProjects() throws Exception {
+        var f = fixture(ProjectVisibility.PUBLIC);
+        var other = user();
+        String stop = base(f) + "/" + f.run().value() + "/stop";
+        var csrf =
+                mvc.perform(get("/api/v1/auth/csrf"))
+                        .andReturn()
+                        .getResponse()
+                        .getCookie("XSRF-TOKEN");
+        mvc.perform(post(stop).cookie(csrf).header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(stop).cookie(cookie(f.owner()))).andExpect(status().isForbidden());
+        mvc.perform(post(stop).cookie(cookie(other), csrf).header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        post(stop)
+                                .header("Authorization", "Bearer " + f.key())
+                                .cookie(csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isUnauthorized());
+        assertThat(runs.get(f.principal(), f.run()).getStatus().name()).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void manualStopRejectsForeignRunsAndNeverOverwritesCompletionOrFailure() throws Exception {
+        var first = fixture(ProjectVisibility.PUBLIC);
+        var second = fixture(ProjectVisibility.PUBLIC);
+        var csrf =
+                mvc.perform(get("/api/v1/auth/csrf"))
+                        .andReturn()
+                        .getResponse()
+                        .getCookie("XSRF-TOKEN");
+        mvc.perform(
+                        post(base(first) + "/" + second.run().value() + "/stop")
+                                .cookie(cookie(first.owner()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isNotFound());
+        runs.complete(first.principal(), first.run());
+        mvc.perform(
+                        post(base(first) + "/" + first.run().value() + "/stop")
+                                .cookie(cookie(first.owner()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isConflict());
+        runs.fail(second.principal(), second.run(), new RunFailCommand("training error"));
+        mvc.perform(
+                        post(base(second) + "/" + second.run().value() + "/stop")
+                                .cookie(cookie(second.owner()), csrf)
+                                .header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isConflict());
+        assertThat(runs.get(second.principal(), second.run()).getError())
+                .isEqualTo("training error");
+    }
 
     @AfterEach
     void cleanup() {

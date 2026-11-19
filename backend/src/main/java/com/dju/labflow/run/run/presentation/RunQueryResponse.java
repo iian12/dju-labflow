@@ -1,6 +1,7 @@
 package com.dju.labflow.run.run.presentation;
 
 import com.dju.labflow.run.run.domain.Run;
+import com.dju.labflow.run.run.domain.RunConnectionStatus;
 import com.dju.labflow.run.run.domain.RunStatus;
 import java.time.Instant;
 import java.util.Map;
@@ -15,8 +16,9 @@ public record RunQueryResponse(
         Instant startedAt,
         Instant endedAt,
         String error,
-        Instant lastHeartbeatAt) {
-    public static RunQueryResponse from(Run run) {
+        Instant lastHeartbeatAt,
+        RunConnectionStatus connectionStatus) {
+    public static RunQueryResponse from(Run run, RunConnectionStatus connectionStatus) {
         return new RunQueryResponse(
                 run.getId().value(),
                 run.getProjectId().value(),
@@ -26,6 +28,7 @@ public record RunQueryResponse(
                 run.getStartedAt(),
                 run.getEndedAt(),
                 run.getError(),
-                run.getLastHeartbeatAt());
+                run.getLastHeartbeatAt(),
+                connectionStatus);
     }
 }
