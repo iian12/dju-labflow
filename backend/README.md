@@ -55,7 +55,7 @@ Spring Boot 4.1과 호환되는 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 �
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/api/v1/auth/csrf` | CSRF 쿠키 초기화. 로그인 불필요 |
-| GET | `/api/v1/auth/me` | 현재 로그인한 사용자의 ID·이름·이메일 (200) |
+| GET | `/api/v1/auth/me` | 현재 로그인한 사용자의 ID·이름·이메일·역할 (200) |
 | POST | `/api/v1/auth/sign-up` | 미인증 회원 생성 및 코드 발송 요청 (201) |
 | POST | `/api/v1/auth/login` | 이메일/비밀번호 인증 후 HttpOnly 인증 쿠키 발급 (204) |
 | POST | `/api/v1/auth/refresh` | refresh 쿠키와 CSRF로 토큰 회전 (204) |
@@ -170,7 +170,7 @@ Run 요약은 같은 프로젝트의 서로 다른 Run 1~100개를 받아 선택
 
 실행 목록은 생성 시각/ID 내림차순, 기본 20개/최대 100개의 페이지이며 전체 `counts.RUNNING/COMPLETED/FAILED`를 함께 반환합니다. records는 각 기록 종류를 시각/ID 오름차순으로 최대 limit개(기본/최대 1000) 반환하고 파라미터는 전체(최대 100개)를 반환합니다. `latest=true`이면 종류별 최근 limit개를 가져와 시간/ID 오름차순으로 반환합니다. 종류별 전체 탐색은 아래 커서 API를 사용합니다. 원문, 사용자 정의 metric 이름과 숫자 값, 선택적인 step/epoch/기록 시각을 보존합니다. 새 테이블이나 스키마 변경은 없습니다.
 
-`frontend/`의 `http://127.0.0.1:5181/#/records`에서 실제 프로젝트와 Run을 선택해 기록을 조회합니다. 상단의 **실험 기록** 링크로도 진입합니다. 최신 페이지는 5초마다 갱신하며 과거 페이지를 탐색하는 동안에는 자동 갱신하지 않습니다. 기존 `frontend-design/`의 화면과 API 테스트 도구는 별도로 유지됩니다.
+`frontend/`의 `http://127.0.0.1:5181/#/records`에서 실제 프로젝트와 Run을 선택해 기록을 조회합니다. 상단의 **실험 기록** 링크로도 진입합니다. 최신 페이지는 5초마다 갱신하며 과거 페이지를 탐색하는 동안에는 자동 갱신하지 않습니다. ADMIN 전용 API 테스트 도구는 `frontend/`의 `/#/api-test`로 통합했습니다. 사용법과 실제 브라우저 검증은 [관리자 API 테스트 안내](../docs/admin-api-workbench.md)를 참고하세요.
 
 기록 커서 API:
 
@@ -379,3 +379,7 @@ SDK 상세와 웹 목록·상세는 실행 상태와 별도로 `connectionStatus
 - `global`: 보안/MVC/OpenAPI 설정, 입력 검증, 예외 응답, ID 생성
 
 각 Java 타입에는 역할을 설명하는 Javadoc을 추가했고, 주요 인증 판단·트랜잭션·필드 갱신에는 처리 의도를 설명하는 주석을 두었습니다.
+
+### ADMIN API 테스트
+
+`GET /api/v1/admin/api-test`는 ADMIN에게 현재 서버의 API 메서드·경로 목록을 반환합니다. 비로그인은 401, 일반 사용자는 403이며 DB의 현재 역할과 계정 상태를 적용합니다. `GET /api/v1/auth/me`의 role로 Studio 진입 링크를 표시하고 요청 전후에도 서버 권한을 재확인합니다. 일반 프로젝트·SDK API의 권한을 우회하지 않습니다. 이전 별도 프런트의 검사는 `AdminApiBrowserIntegrationTests`와 현재 Studio의 검사로 대체했습니다.

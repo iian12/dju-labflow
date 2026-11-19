@@ -134,6 +134,8 @@ public class SecurityConfig {
                                                 "/api/v1/projects/{projectId}/runs/{runId}/records",
                                                 "/api/v1/projects/{projectId}/runs/{runId}/records/{kind}")
                                         .permitAll()
+                                        .requestMatchers("/api/v1/admin/**")
+                                        .hasRole("ADMIN")
                                         .anyRequest()
                                         .authenticated())
                 .addFilterBefore(

@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const files = (await readdir(new URL('./', import.meta.url)))
   // Former sample-data layout tests stay as design references; production now uses real API data.
-  .filter(file => ['auth.e2e.ts', 'heartbeat.e2e.ts', 'records.e2e.ts', 'studio.live.e2e.ts'].includes(file))
+  .filter(file => ['api.test.ts', 'api-workbench.e2e.ts', 'auth.e2e.ts', 'heartbeat.e2e.ts', 'records.e2e.ts', 'studio.live.e2e.ts'].includes(file))
   .sort()
   .map(file => fileURLToPath(new URL(file, import.meta.url)));
 if (!files.length) throw new Error('No E2E tests found');

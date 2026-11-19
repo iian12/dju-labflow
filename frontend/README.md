@@ -1,6 +1,6 @@
 # LabFlow Studio
 
-`frontend-design`의 인증 흐름과 현재 Studio 디자인을 유지하면서 모든 활성 화면을 실제 백엔드 API로 연결했습니다. 프로젝트·Run·지표·파라미터·로그·API 키에 샘플 데이터를 대신 표시하지 않습니다.
+Studio 디자인으로 모든 활성 화면을 실제 백엔드 API에 연결했습니다. 프로젝트·Run·지표·파라미터·로그·API 키에 샘플 데이터를 대신 표시하지 않습니다. API 테스트 도구도 이 앱에서 제공합니다.
 
 ## 실행
 
@@ -31,7 +31,7 @@ PUBLIC 프로젝트 링크는 익명 조회가 가능하고 PRIVATE과 프로젝
 
 - `npm run typecheck`: 앱·테스트 strict TypeScript 검사
 - `npm run build`: 타입 검사 및 프로덕션 빌드
-- `npm test`: 인증·기록 커서·실제 API 데이터 기반 Studio 테스트 10개(모의 API), Edge headless 사용
+- `npm test`: 인증·기록 커서·Heartbeat·Studio·관리자 API 테스트와 요청 클라이언트 검사 29개, 브라우저 검사는 Edge headless 사용
 - 이전 샘플 화면 전용 탐색 테스트 파일은 디자인 참고용으로 보존했으며 현재 `npm test` 대상에서 제외했습니다.
 
 실제 HTTP/H2 백엔드와 프런트 전체 흐름 검증(저장소 루트 PowerShell):
@@ -65,3 +65,7 @@ $env:LABFLOW_RECORDS_NODE = (Get-Command node).Source
 ```
 
 임시 PRIVATE 프로젝트와 1,005개 로그를 만들고 실제 커서 탐색·새 기록 전송·자동 갱신·메트릭/텍스트/시스템 조회·모바일을 확인한 뒤 데이터를 정리합니다. 기존 `npm test`에도 모의 API를 이용한 커서/최신/권한/64비트 ID·모바일 테스트가 포함됩니다.
+
+## 관리자 API 테스트
+
+ADMIN 로그인 시 상단 **API 테스트** 또는 `/#/api-test`로 진입합니다. 현재 39개 API의 JSON·커서·파일 전송, 연결 컨텍스트, 요청·응답 기록과 마스킹을 제공합니다. 서버 권한 확인으로 일반 사용자와 비로그인 접근을 차단합니다. [관리자 API 테스트 안내](../docs/admin-api-workbench.md)에 사용법과 실제 HTTP/H2 통합 검증 명령을 정리했습니다.

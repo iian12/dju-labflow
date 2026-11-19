@@ -1,4 +1,4 @@
-export type Session = { userId: string; name: string; email: string };
+export type Session = { userId: string; name: string; email: string; role: 'ADMIN' | 'USER' };
 export type LiveProject = { projectId: string; name: string; description: string | null; createdBy: string; visibility: 'PUBLIC' | 'PRIVATE'; createdAt: string; updatedAt: string | null; version: number | string };
 export type Status = 'RUNNING' | 'COMPLETED' | 'FAILED';
 export type ConnectionStatus = 'WAITING' | 'CONNECTED' | 'DISCONNECTED' | 'INACTIVE';
