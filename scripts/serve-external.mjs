@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { dirname, extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isIP } from 'node:net'
 
 // Serve compiled assets only; development sources and environment files stay private.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../frontend/dist')
@@ -34,8 +35,11 @@ const server = http.createServer(async (request, response) => {
       delete headers['x-forwarded-for']
       delete headers['x-forwarded-host']
       delete headers['x-forwarded-proto']
-      // Keep the original client's address for the backend's request limiter.
-      headers['x-forwarded-for'] = request.headers['cf-connecting-ip'] ?? request.socket.remoteAddress
+      // Enable only when ingress is exclusively Cloudflare/cloudflared, which replaces this header.
+      const cloudflare = process.env.LABFLOW_TRUST_CLOUDFLARE_HEADERS === 'true' ? request.headers['cf-connecting-ip'] : undefined
+      headers['x-forwarded-for'] = typeof cloudflare === 'string' && isIP(cloudflare) ? cloudflare : request.socket.remoteAddress
+      delete headers['cf-connecting-ip']
+      delete headers['x-real-ip']
       headers['x-forwarded-proto'] = 'https'
       headers['x-forwarded-host'] = request.headers.host
       const proxy = http.request(new URL(url.pathname + url.search, upstream), { method: request.method, headers, timeout: 30000 }, result => {

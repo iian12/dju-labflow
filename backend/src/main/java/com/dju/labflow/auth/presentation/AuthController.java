@@ -1,16 +1,20 @@
 package com.dju.labflow.auth.presentation;
 
 import com.dju.labflow.auth.application.AuthService;
+import com.dju.labflow.auth.application.LoginResult;
 import com.dju.labflow.auth.application.token.TokenLogoutService;
 import com.dju.labflow.auth.application.token.TokenRefreshService;
+import com.dju.labflow.auth.domain.TokenRefreshResult;
 import com.dju.labflow.auth.infrastructure.cookie.AuthCookieProvider;
 import com.dju.labflow.global.SecurityErrorResponse;
+import com.dju.labflow.global.security.ClientAddressResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.*;
 import io.swagger.v3.oas.annotations.responses.*;
 import io.swagger.v3.oas.annotations.security.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.time.Instant;
@@ -46,16 +50,22 @@ public class AuthController {
     private final TokenRefreshService tokenRefreshService;
     private final TokenLogoutService tokenLogoutService;
     private final AuthCookieProvider authCookieProvider;
+    private final LoginRequestLimiter loginLimiter;
+    private final ClientAddressResolver addresses;
 
     public AuthController(
             AuthService authService,
             TokenRefreshService tokenRefreshService,
             TokenLogoutService tokenLogoutService,
-            AuthCookieProvider authCookieProvider) {
+            AuthCookieProvider authCookieProvider,
+            LoginRequestLimiter loginLimiter,
+            ClientAddressResolver addresses) {
         this.authService = authService;
         this.tokenRefreshService = tokenRefreshService;
         this.tokenLogoutService = tokenLogoutService;
         this.authCookieProvider = authCookieProvider;
+        this.loginLimiter = loginLimiter;
+        this.addresses = addresses;
     }
 
     @PostMapping("/login")
@@ -65,9 +75,16 @@ public class AuthController {
             description =
                     "ACTIVE 계정만 허용합니다. CSRF는 필요하지 않으며 access_token/refresh_token HttpOnly 쿠키를 발급합니다.")
     @ApiResponse(responseCode = "204", description = "인증 쿠키 발급", content = @Content)
+    @ApiResponse(
+            responseCode = "429",
+            description = "IP 또는 이메일/IP 로그인 요청 한도 초과",
+            content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class)))
     public ResponseEntity<Void> login(
-            @Valid @RequestBody LoginRequest request, HttpServletResponse response) {
-        var result = authService.login(request.toCommand());
+            @Valid @RequestBody LoginRequest request,
+            HttpServletResponse response,
+            HttpServletRequest servletRequest) {
+        loginLimiter.check(addresses.resolve(servletRequest), request.email());
+        LoginResult result = authService.login(request.toCommand());
         return authenticated(
                 result.accessToken(),
                 result.refreshToken(),
@@ -86,7 +103,7 @@ public class AuthController {
             @Parameter(hidden = true) @CookieValue(value = "refresh_token", required = false)
                     @Nullable String refreshToken,
             HttpServletResponse response) {
-        var result = tokenRefreshService.refresh(refreshToken);
+        TokenRefreshResult result = tokenRefreshService.refresh(refreshToken);
         return authenticated(
                 result.accessToken(),
                 result.refreshToken(),

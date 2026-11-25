@@ -3,6 +3,7 @@ package com.dju.labflow.auth.presentation;
 import com.dju.labflow.auth.application.AuthService;
 import com.dju.labflow.auth.application.SignUpCommand;
 import com.dju.labflow.auth.application.verification.EmailVerificationService;
+import com.dju.labflow.global.security.ClientAddressResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
@@ -23,14 +24,17 @@ public class EmailVerificationController {
     private final AuthService authService;
     private final EmailVerificationService emailVerificationService;
     private final VerificationRequestLimiter verificationRequestLimiter;
+    private final ClientAddressResolver addresses;
 
     public EmailVerificationController(
             AuthService authService,
             EmailVerificationService emailVerificationService,
-            VerificationRequestLimiter verificationRequestLimiter) {
+            VerificationRequestLimiter verificationRequestLimiter,
+            ClientAddressResolver addresses) {
         this.authService = authService;
         this.emailVerificationService = emailVerificationService;
         this.verificationRequestLimiter = verificationRequestLimiter;
+        this.addresses = addresses;
     }
 
     @PostMapping("/sign-up")
@@ -40,7 +44,7 @@ public class EmailVerificationController {
             summary = "회원가입 및 인증 코드 발송",
             description = "미인증 계정을 생성합니다. 메일 미수신 시 60초 후 재발송할 수 있습니다.")
     public void signUp(@Valid @RequestBody SignUpRequest body, HttpServletRequest request) {
-        verificationRequestLimiter.check(request.getRemoteAddr(), false);
+        verificationRequestLimiter.check(addresses.resolve(request), false);
         authService.signUp(
                 new SignUpCommand(
                         body.email(), body.password(), body.confirmPassword(), body.name()));
@@ -53,7 +57,7 @@ public class EmailVerificationController {
             summary = "인증 코드 확인",
             description = "코드는 10분간 유효하며 최대 5회 검증 실패 후 사용할 수 없습니다. CSRF 쿠키와 헤더가 필요합니다.")
     public void verify(@Valid @RequestBody VerifyRequest body, HttpServletRequest request) {
-        verificationRequestLimiter.check(request.getRemoteAddr(), true);
+        verificationRequestLimiter.check(addresses.resolve(request), true);
         emailVerificationService.verify(body.email(), body.code());
     }
 
@@ -64,7 +68,7 @@ public class EmailVerificationController {
             summary = "인증 코드 재발송 요청",
             description = "60초 간격, 계정당 시간당 5회. 계정 존재/상태 및 제한 여부와 무관하게 202를 반환합니다. CSRF가 필요합니다.")
     public void resend(@Valid @RequestBody ResendRequest body, HttpServletRequest request) {
-        verificationRequestLimiter.check(request.getRemoteAddr(), false);
+        verificationRequestLimiter.check(addresses.resolve(request), false);
         emailVerificationService.resend(body.email());
     }
 
