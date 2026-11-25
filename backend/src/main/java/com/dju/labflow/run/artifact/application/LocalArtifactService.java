@@ -1,32 +1,26 @@
 package com.dju.labflow.run.artifact.application;
 
-import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
 import com.dju.labflow.run.artifact.domain.*;
 import com.dju.labflow.run.artifact.domain.repository.RunArtifactRepository;
 import com.dju.labflow.run.run.application.RunAccessPolicy;
 import com.dju.labflow.run.run.domain.RunId;
-import com.dju.labflow.run.run.exception.RunStateConflictException;
-import jakarta.persistence.EntityManager;
 import java.io.*;
 import java.nio.file.*;
 import java.security.*;
-import java.time.Clock;
 import java.util.HexFormat;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.*;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class LocalArtifactService {
     private final RunAccessPolicy access;
     private final RunArtifactRepository artifacts;
-    private final EntityManager em;
-    private final IdGenerator ids;
-    private final Clock clock;
+    private final LocalArtifactTransactions uploads;
     private final Path root;
     private final long fileLimit;
     private final long projectLimit;
@@ -34,23 +28,19 @@ public class LocalArtifactService {
     public LocalArtifactService(
             RunAccessPolicy access,
             RunArtifactRepository artifacts,
-            EntityManager em,
-            IdGenerator ids,
-            Clock clock,
+            LocalArtifactTransactions uploads,
             @Value("${labflow.artifacts.directory:./data/artifacts}") String directory,
             @Value("${labflow.artifacts.max-file-bytes:1073741824}") long fileLimit,
             @Value("${labflow.artifacts.max-project-bytes:21474836480}") long projectLimit) {
         this.access = access;
         this.artifacts = artifacts;
-        this.em = em;
-        this.ids = ids;
-        this.clock = clock;
+        this.uploads = uploads;
         this.root = Path.of(directory).toAbsolutePath().normalize();
         this.fileLimit = fileLimit;
         this.projectLimit = projectLimit;
     }
 
-    @Transactional(rollbackFor = IOException.class)
+    @Transactional(propagation = Propagation.NEVER)
     public RunArtifact upload(
             ProjectApiKeyPrincipal principal,
             RunId runId,
@@ -62,59 +52,35 @@ public class LocalArtifactService {
             throws IOException {
         if (length < 0) throw new ResponseStatusException(HttpStatus.LENGTH_REQUIRED);
         if (length > fileLimit) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE);
-        if (!requestId.matches("[a-zA-Z0-9_-]{1,64}"))
+        if (requestId == null || !requestId.matches("[a-zA-Z0-9_-]{1,64}"))
             throw new IllegalArgumentException("Invalid request ID");
-        var run = access.requireOwnedForUpdate(principal, runId);
-        var previous = artifacts.findByRunIdAndClientRequestId(runId, requestId);
-        if (previous.isPresent()) {
-            var old = previous.get();
-            if (old.getStatus() == ArtifactStatus.READY
-                    && old.getName().equals(name)
-                    && old.getKind() == kind
-                    && old.getSizeBytes() == length
-                    && old.getSha256().equals(copy(input, OutputStream.nullOutputStream(), length)))
-                return old;
-            throw new RunStateConflictException(
-                    "Artifact request ID already used with different content");
+        RunArtifact reserved =
+                uploads.reserve(principal, runId, name, kind, requestId, length, projectLimit);
+        if (reserved.getStatus() == ArtifactStatus.READY) {
+            return uploads.complete(
+                    principal, reserved, copy(input, OutputStream.nullOutputStream(), length));
         }
-        run.requireRunning();
-        Number used =
-                (Number)
-                        em.createNativeQuery(
-                                        "select coalesce(sum(a.size_bytes),0) from run_artifact_entity a join run_entity r on r.id=a.run_id where r.project_id=:project")
-                                .setParameter("project", principal.projectId().value())
-                                .getSingleResult();
-        if (length > projectLimit - used.longValue())
-            throw new ResponseStatusException(
-                    HttpStatus.PAYLOAD_TOO_LARGE, "Project storage limit exceeded");
-        var id = RunArtifactId.of(ids.nextId());
-        var now = clock.instant();
-        var artifact =
-                RunArtifact.create(
-                        id,
-                        runId,
-                        name,
-                        kind,
-                        "application/octet-stream",
-                        length,
-                        "local",
-                        id.value().toString(),
-                        null,
-                        requestId,
-                        now,
-                        now.plusSeconds(86400));
-        Files.createDirectories(root);
-        Path path = root.resolve(id.value().toString());
-        try (var out = Files.newOutputStream(path, StandardOpenOption.CREATE_NEW)) {
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        public void afterCompletion(int status) {
-                            if (status == STATUS_ROLLED_BACK) remove(path);
-                        }
-                    });
-            artifact.completeUpload(length, copy(input, out, length), clock.instant());
+        Path path = root.resolve(reserved.getId().value().toString());
+        Path partial = root.resolve(reserved.getId().value() + ".part");
+        try {
+            Files.createDirectories(root);
+            String sha256;
+            try (OutputStream out = Files.newOutputStream(partial, StandardOpenOption.CREATE_NEW)) {
+                sha256 = copy(input, out, length);
+            }
+            // Publication is a local rename, never a copy under a database lock.
+            Files.move(partial, path, StandardCopyOption.ATOMIC_MOVE);
+            return uploads.complete(principal, reserved, sha256);
+        } catch (IOException | RuntimeException | Error failure) {
+            remove(partial);
+            remove(path);
+            try {
+                uploads.discard(principal, reserved);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
         }
-        return artifacts.save(artifact);
     }
 
     private static String copy(InputStream in, OutputStream out, long length) throws IOException {
@@ -147,7 +113,10 @@ public class LocalArtifactService {
 
     @org.springframework.transaction.event.TransactionalEventListener
     public void projectDeleted(LocalFilesDeleted event) {
-        for (Long id : event.ids()) remove(root.resolve(id.toString()));
+        for (Long id : event.ids()) {
+            remove(root.resolve(id.toString()));
+            remove(root.resolve(id + ".part"));
+        }
     }
 
     public record LocalFilesDeleted(java.util.List<Long> ids) {}
@@ -162,7 +131,7 @@ public class LocalArtifactService {
 
     /** Caller must authorize read access to this run. */
     public Download localDownload(RunId runId, long id) {
-        var artifact =
+        RunArtifact artifact =
                 artifacts
                         .findById(RunArtifactId.of(id))
                         .filter(

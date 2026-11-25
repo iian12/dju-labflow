@@ -346,7 +346,9 @@ Artifact는 생성 시 `UPLOADING`이며 예약 크기와 실제 크기가 일�
 
 SDK는 실행 중인 Run의 `POST /api/v1/sdk/runs/{runId}/artifacts?name=...&kind=OTHER`로 바이너리를 전송합니다. Content-Length와 X-Request-ID가 필요하며 성공 응답에는 artifactId가 들어 있습니다. 같은 요청 ID와 동일한 이름·종류·내용은 기존 ID를 반환합니다. 다운로드는 같은 프로젝트 키로 `GET /api/v1/sdk/runs/{runId}/artifacts/{artifactId}`를 호출하며 종료한 Run도 지원합니다.
 
-파일은 백엔드 작업 디렉터리 기준 `./data/artifacts`에 저장합니다. `labflow.artifacts.directory`, `labflow.artifacts.max-file-bytes`(기본 1 GiB), `labflow.artifacts.max-project-bytes`(기본 20 GiB)로 설정합니다. 업로드는 단일 HTTP 요청으로 스트리밍하며 프로젝트 잠금으로 용량 검사를 직렬화합니다. 프로젝트 삭제 커밋 후 로컬 파일 삭제를 시도합니다.
+파일은 백엔드 작업 디렉터리 기준 `./data/artifacts`에 저장합니다. `labflow.artifacts.directory`, `labflow.artifacts.max-file-bytes`(기본 1 GiB), `labflow.artifacts.max-project-bytes`(기본 20 GiB)로 설정합니다. 업로드는 짧은 트랜잭션에서 프로젝트·Run 잠금과 용량 예약 → 잠금 밖에서 `.part` 파일 스트리밍·SHA-256 계산·로컬 원자적 이름 변경 → 짧은 트랜잭션에서 소속·실행 상태·기한 재검증과 READY 확정으로 처리합니다. UPLOADING 예약 크기도 프로젝트 용량에 포함하므로 동시 업로드로 한도를 넘길 수 없습니다. 전송 중 같은 프로젝트의 다른 Run 기록과 Heartbeat는 진행할 수 있습니다.
+
+동일 요청 ID가 아직 UPLOADING이면 409를 반환합니다. 일반 전송 실패는 파일과 예약을 제거하여 같은 ID로 재시도할 수 있습니다. 전송 중 프로젝트 삭제 또는 Run 종료가 먼저 확정되면 업로드 완료를 거부하고 파일·예약을 정리합니다. 비정상 종료로 남은 예약은 다음 업로드 예약 시 24시간 기한을 기준으로 정리합니다. 프로젝트 삭제 커밋 후에는 완료 파일과 임시 파일을 모두 삭제 시도합니다. DB 스키마 추가는 없습니다. 파일 삭제 자체가 실패하면 로그가 남으며 실제 MariaDB 잠금 및 파일시스템 장애는 별도 운영 검증이 필요합니다.
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
