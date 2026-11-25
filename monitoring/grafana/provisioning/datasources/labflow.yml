@@ -1,0 +1,12 @@
+apiVersion: 1
+datasources:
+  - name: LabFlow Prometheus
+    uid: labflow-prometheus
+    type: prometheus
+    access: proxy
+    url: http://labflow-prometheus:9090
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s

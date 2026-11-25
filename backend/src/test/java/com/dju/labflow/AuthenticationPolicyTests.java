@@ -7,6 +7,7 @@ import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.jwt.JwtProperties;
 import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
 import com.dju.labflow.auth.infrastructure.security.AppPrincipal;
+import com.dju.labflow.project.key.application.ProjectApiKeyAuthenticationAttempt;
 import com.dju.labflow.project.key.application.ProjectApiKeyAuthenticationService;
 import com.dju.labflow.project.key.domain.*;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
@@ -127,7 +128,8 @@ class AuthenticationPolicyTests {
         when(users.findById(UserId.of(1L))).thenReturn(Optional.of(user(status)));
         when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(true);
         ProjectApiKeyAuthenticationService service =
-                new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
+                new ProjectApiKeyAuthenticationService(
+                        new ProjectApiKeyAuthenticationAttempt(keys, users, clock), hasher);
         if (status == AccountStatus.ACTIVE) {
             assertThat(service.authenticate(raw).projectId()).isEqualTo(ProjectId.of(10L));
         } else {
@@ -160,7 +162,8 @@ class AuthenticationPolicyTests {
         when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(false);
 
         ProjectApiKeyAuthenticationService service =
-                new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
+                new ProjectApiKeyAuthenticationService(
+                        new ProjectApiKeyAuthenticationAttempt(keys, users, clock), hasher);
         assertThatThrownBy(() -> service.authenticate(raw))
                 .isInstanceOf(InvalidProjectApiKeyException.class);
     }

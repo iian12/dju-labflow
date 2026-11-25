@@ -1,0 +1,3 @@
+# Deployment scripts are copied from Windows to Linux over SSH.
+scripts/deploy/*.sh text eol=lf
+scripts/monitoring/*.sh text eol=lf

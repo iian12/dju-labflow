@@ -1,0 +1,32 @@
+name: labflow-monitoring
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    container_name: labflow-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  prometheus-data:
+    name: labflow-prometheus-data
+
+networks:
+  monitoring:
+    name: labflow-monitoring

@@ -1,0 +1,72 @@
+LabFlow monitoring
+
+Dashboard: http://localhost:3000/d/labflow-performance
+Prometheus targets: http://localhost:9090/targets
+
+Windows PC runs Prometheus and Grafana through Docker Desktop. Keep the PC awake
+and Docker Desktop running during tests. Prometheus stores metrics in the
+labflow-prometheus-data Docker volume (up to 15 days or 2GB).
+
+The Windows task "LabFlow Monitoring SSH Tunnel" starts at this user's login
+and reconnects after connection failures. The native Windows SSH client uses
+the existing key authentication; no SSH password is saved by this setup.
+Forwarded loopback ports: 19100 -> Pi 9100, 18081 -> Pi 8081.
+
+From the repository root:
+  docker compose -f monitoring/compose.yml up -d
+  docker compose -f monitoring/compose.yml logs --tail 50
+  node scripts/monitoring/verify.mjs
+
+Raspberry Pi:
+  systemctl status prometheus-node-exporter labflow-pi-metrics.timer
+  systemctl --user status labflow-backend
+  curl http://127.0.0.1:9100/metrics
+  curl http://127.0.0.1:8081/actuator/prometheus
+
+The exporter and management HTTP listener bind only to loopback. The public
+application port does not permit anonymous metrics scraping.
+
+NVMe locations:
+  /mnt/nvme/labflow-monitoring/textfile/pi.prom
+  /mnt/nvme/labflow/ops/monitoring/collect-pi-metrics.sh
+  /mnt/nvme/labflow/shared/logs/backend.log
+  /mnt/nvme/labflow/shared/backups/before-monitoring-20261125.sql.gz
+
+Dashboard provisioning source is in monitoring/grafana. It has been copied into
+the existing labflow-grafana container, with dashboard JSON in its persistent
+data volume. If recreating that container, copy the provisioning YAML files
+again or mount monitoring/grafana/provisioning as /etc/grafana/provisioning.
+
+The dashboard's latency is the WAS request latency. k6 results measure client
+round-trip latency and should be retained separately for load-test reports.
+Idle APIs may show no latency data until requests arrive. Load tests are started
+separately using the workflow below.
+
+Major API and bounded k6 verification (keep test credentials out of Git):
+  Set JAVA_HOME to the installed Java 21 JDK.
+  node scripts/monitoring/prepare-fixture.mjs https://YOUR-LABFLOW-HOST
+  Send .external-access/deployment-test/seed.sql over SSH to the test account
+  fixture in the target LabFlow database, then remove that SQL copy.
+  From frontend: node tests/deployment.external.ts
+  From the repository root: node scripts/monitoring/run-cycle.mjs
+  Optionally provide LABFLOW_GRAFANA_USER and LABFLOW_GRAFANA_PASSWORD in the
+  process environment to record the test interval as a Grafana annotation.
+  Results and HTML report: .external-access/load-tests/<cycle>/
+  The runner deletes its temporary project/user and private execution context.
+
+API-key authentication regression against MariaDB:
+  Use a disposable local MariaDB 11.8 database named labflow_auth_test, published
+  only on 127.0.0.1:33070. Start it with --innodb-snapshot-isolation=ON and
+  --transaction-isolation=REPEATABLE-READ to reproduce the Pi's DB defaults.
+  Set LABFLOW_AUTH_TEST_DB_URL=jdbc:mariadb://127.0.0.1:33070/labflow_auth_test
+  and LABFLOW_AUTH_TEST_DB_PASSWORD to its root password in the current process.
+  From backend: .\gradlew.bat test --tests '*MariaDbApiKeyAuthenticationIntegrationTests'
+  These seven tests reject remote/production database targets. Without the URL
+  environment variable the suite is skipped. No production .env is imported.
+  Delete only this disposable database/container after the tests.
+
+Authentication now uses a fresh READ COMMITTED transaction for each attempt;
+the database and connection pool defaults stay REPEATABLE READ. Only known
+conflicts (1020/1213/1205 or SQLSTATE 40001) are retried, at most three attempts.
+Exhaustion returns 503 with Retry-After: 1 before any SDK request body executes.
+Invalid/revoked keys still return 401, and downstream SDK writes are not replayed.

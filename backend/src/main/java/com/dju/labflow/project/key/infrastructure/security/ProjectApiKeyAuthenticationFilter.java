@@ -1,13 +1,16 @@
 package com.dju.labflow.project.key.infrastructure.security;
 
+import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.application.ProjectApiKeyAuthenticationService;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.project.key.exception.ProjectApiKeyAuthenticationUnavailableException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
@@ -15,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.json.JsonMapper;
 
 /** SDK 경로의 Bearer API 키만 처리하고 일반 사용자 쿠키 인증과 분리한다. */
 @Component
@@ -25,12 +29,15 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private final ProjectApiKeyAuthenticationService projectApiKeyAuthenticationService;
 
     private final AuthenticationEntryPoint authenticationEntryPoint;
+    private final JsonMapper jsonMapper;
 
     public ProjectApiKeyAuthenticationFilter(
             ProjectApiKeyAuthenticationService projectApiKeyAuthenticationService,
-            AuthenticationEntryPoint authenticationEntryPoint) {
+            AuthenticationEntryPoint authenticationEntryPoint,
+            JsonMapper jsonMapper) {
         this.projectApiKeyAuthenticationService = projectApiKeyAuthenticationService;
         this.authenticationEntryPoint = authenticationEntryPoint;
+        this.jsonMapper = jsonMapper;
     }
 
     @Override
@@ -66,6 +73,19 @@ public class ProjectApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
             context.setAuthentication(authentication);
             SecurityContextHolder.setContext(context);
+        } catch (ProjectApiKeyAuthenticationUnavailableException unavailable) {
+            SecurityContextHolder.clearContext();
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+            response.setHeader(HttpHeaders.RETRY_AFTER, "1");
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
+            jsonMapper.writeValue(
+                    response.getWriter(),
+                    new SecurityErrorResponse(
+                            "AUTHENTICATION_TEMPORARILY_UNAVAILABLE",
+                            "Authentication is temporarily unavailable. Please retry."));
+            return;
         } catch (AuthenticationException e) {
             SecurityContextHolder.clearContext();
             authenticationEntryPoint.commence(request, response, e);

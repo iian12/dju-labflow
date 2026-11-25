@@ -35,18 +35,21 @@ public class SecurityConfig {
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
     private final ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter;
     private final AuthCookieProperties authCookieProperties;
+    private final ManagementScrapeRequestMatcher managementScrapeRequestMatcher;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             CustomAuthenticationEntryPoint authenticationEntryPoint,
             CustomAccessDeniedHandler customAccessDeniedHandler,
             ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
-            AuthCookieProperties authCookieProperties) {
+            AuthCookieProperties authCookieProperties,
+            ManagementScrapeRequestMatcher managementScrapeRequestMatcher) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.customAccessDeniedHandler = customAccessDeniedHandler;
         this.projectApiKeyAuthenticationFilter = projectApiKeyAuthenticationFilter;
         this.authCookieProperties = authCookieProperties;
+        this.managementScrapeRequestMatcher = managementScrapeRequestMatcher;
     }
 
     @Bean
@@ -136,6 +139,10 @@ public class SecurityConfig {
                                         .permitAll()
                                         .requestMatchers("/api/v1/admin/**")
                                         .hasRole("ADMIN")
+                                        // Only the separate loopback management listener permits
+                                        // scraping.
+                                        .requestMatchers(managementScrapeRequestMatcher)
+                                        .permitAll()
                                         .anyRequest()
                                         .authenticated())
                 .addFilterBefore(

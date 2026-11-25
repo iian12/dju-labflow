@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    deployment: labflow-raspberry-pi
+
+scrape_configs:
+  - job_name: raspberry-pi
+    scrape_timeout: 4s
+    static_configs:
+      - targets: ["host.docker.internal:19100"]
+
+  - job_name: labflow-backend
+    metrics_path: /actuator/prometheus
+    scrape_timeout: 4s
+    static_configs:
+      - targets: ["host.docker.internal:18081"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
