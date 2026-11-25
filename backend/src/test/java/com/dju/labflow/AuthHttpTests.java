@@ -11,6 +11,7 @@ import com.dju.labflow.auth.domain.*;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.jwt.JwtProperties;
 import com.dju.labflow.project.key.presentation.IssueProjectApiKeyResponse;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.repository.*;
 import com.dju.labflow.project.project.presentation.ProjectCreateResponse;
 import com.dju.labflow.sdk.presentation.RunCreateResponse;
@@ -37,6 +38,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.*;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -70,8 +72,8 @@ class AuthHttpTests {
                 .executeWithoutResult(
                         status -> {
                             for (UserId owner : owners) {
-                                for (var p : projects.findByCreatedBy(owner, 0, 100).items()) {
-                                    var locked =
+                                for (Project p : projects.findByCreatedBy(owner, 0, 100).items()) {
+                                    Project locked =
                                             projects.findByIdForUpdate(p.getId()).orElseThrow();
                                     contents.deleteByProjectId(p.getId());
                                     projects.delete(locked);
@@ -91,7 +93,7 @@ class AuthHttpTests {
     @Test
     void loginIssuesHttpOnlyAuthCookiesWithoutTokenBodyAndPreservesCsrfCookie() throws Exception {
         User user = user(AccountStatus.ACTIVE);
-        var response =
+        MockHttpServletResponse response =
                 loginResponse(user)
                         .andExpect(status().isNoContent())
                         .andExpect(content().string(""))
@@ -113,7 +115,7 @@ class AuthHttpTests {
         assertThat(session.refresh().getMaxAge())
                 .isPositive()
                 .isLessThanOrEqualTo((int) jwtProperties.refreshTokenExpiration().toSeconds());
-        var stored =
+        RefreshToken stored =
                 refreshTokens
                         .findByTokenHash(hasher.hash(session.refresh().getValue()))
                         .orElseThrow();
@@ -150,7 +152,7 @@ class AuthHttpTests {
         owners.add(pending.getId());
         assertThat(pending.getAccountStatus()).isEqualTo(AccountStatus.PENDING_VERIFICATION);
         loginResponse(pending).andExpect(status().isUnauthorized());
-        var code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
         verify(sender).send(eq(email), code.capture());
         withCsrf(
                         post(BASE + "/email-verifications/verify")
@@ -160,7 +162,7 @@ class AuthHttpTests {
                                                 Map.of("email", email, "code", code.getValue()))))
                 .andExpect(status().isNoContent());
         Session session = login(pending);
-        var project =
+        MockHttpServletResponse project =
                 withCsrf(
                                 post("/api/v1/projects")
                                         .cookie(session.access())
@@ -174,7 +176,7 @@ class AuthHttpTests {
                 jsonMapper
                         .readValue(project.getContentAsString(), ProjectCreateResponse.class)
                         .projectId();
-        var key =
+        MockHttpServletResponse key =
                 withCsrf(
                                 post("/api/v1/project-api-keys/issue/" + projectId)
                                         .cookie(session.access())
@@ -187,7 +189,7 @@ class AuthHttpTests {
                 jsonMapper
                         .readValue(key.getContentAsString(), IssueProjectApiKeyResponse.class)
                         .rawApiKey();
-        var run =
+        MockHttpServletResponse run =
                 mvc.perform(
                                 post("/api/v1/sdk/runs")
                                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + rawKey)
@@ -222,13 +224,13 @@ class AuthHttpTests {
     @Test
     void wrongPasswordAndUnknownEmailReturnSameGeneric401WithoutAuthCookies() throws Exception {
         User user = user(AccountStatus.ACTIVE);
-        var wrong =
+        MockHttpServletResponse wrong =
                 credentials(user.getEmail(), "wrong-password")
                         .andExpect(status().isUnauthorized())
                         .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                         .andReturn()
                         .getResponse();
-        var missing =
+        MockHttpServletResponse missing =
                 credentials("missing@example.test", PASSWORD)
                         .andExpect(status().isUnauthorized())
                         .andReturn()
@@ -303,7 +305,7 @@ class AuthHttpTests {
     void refreshRotatesCookiesAndOldTokenCannotBeReused() throws Exception {
         User user = user(AccountStatus.ACTIVE);
         Session first = login(user);
-        var result =
+        MockHttpServletResponse result =
                 refresh(first.refresh())
                         .andExpect(status().isNoContent())
                         .andExpect(content().string(""))
@@ -327,13 +329,13 @@ class AuthHttpTests {
     void refreshWorksWithExpiredAccessJwt() throws Exception {
         User user = user(AccountStatus.ACTIVE);
         Session original = login(user);
-        var oldIssuer =
+        AccessTokenProvider oldIssuer =
                 new AccessTokenProvider(
                         jwtProperties, Clock.offset(Clock.systemUTC(), Duration.ofHours(-1)));
         Cookie expired =
                 new Cookie("access_token", oldIssuer.createAccessToken(user.getId(), Role.USER));
         mvc.perform(get("/api/v1/projects").cookie(expired)).andExpect(status().isUnauthorized());
-        var result =
+        MockHttpServletResponse result =
                 withCsrf(post(BASE + "/refresh").cookie(expired, original.refresh()))
                         .andExpect(status().isNoContent())
                         .andReturn()
@@ -432,7 +434,7 @@ class AuthHttpTests {
         User user = user(AccountStatus.ACTIVE);
         Session first = login(user);
         Session other = login(user);
-        var response =
+        MockHttpServletResponse response =
                 logout(first.refresh())
                         .andExpect(status().isNoContent())
                         .andExpect(content().string(""))
@@ -464,8 +466,8 @@ class AuthHttpTests {
         User user = user(AccountStatus.ACTIVE);
         Session first = login(user);
         Cookie csrf = csrf();
-        var start = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             List<Future<MockHttpServletResponse>> calls = new ArrayList<>();
             for (int i = 0; i < 2; i++)
                 calls.add(
@@ -483,12 +485,13 @@ class AuthHttpTests {
                                             .getResponse();
                                 }));
             start.countDown();
-            var responses = new ArrayList<MockHttpServletResponse>();
-            for (var call : calls) responses.add(call.get(10, TimeUnit.SECONDS));
+            ArrayList<MockHttpServletResponse> responses = new ArrayList<>();
+            for (Future<MockHttpServletResponse> call : calls)
+                responses.add(call.get(10, TimeUnit.SECONDS));
             assertThat(responses)
                     .extracting(MockHttpServletResponse::getStatus)
                     .containsExactlyInAnyOrder(204, 401);
-            var success =
+            MockHttpServletResponse success =
                     responses.stream().filter(r -> r.getStatus() == 204).findFirst().orElseThrow();
             assertThat(stored(session(success).refresh()).isRevoked()).isFalse();
             assertThat(activeTokens(user.getId())).isEqualTo(1);
@@ -581,7 +584,7 @@ class AuthHttpTests {
     }
 
     private ResultActions tokenRequest(String path, Cookie token) throws Exception {
-        var request = post(BASE + path);
+        MockHttpServletRequestBuilder request = post(BASE + path);
         if (token != null) request.cookie(token);
         return withCsrf(request);
     }

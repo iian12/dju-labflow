@@ -3,6 +3,7 @@ package com.dju.labflow.project.project.infrastructure.persistence;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.project.project.domain.repository.ProjectContentsRepository;
 import jakarta.persistence.EntityManager;
+import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,7 +29,7 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
         Objects.requireNonNull(projectId, "Project ID must not be null");
         entityManager.flush();
         String runs = "select id from run_entity where project_id = :projectId";
-        var localIds =
+        List<Long> localIds =
                 entityManager
                         .createQuery(
                                 "select a.id from RunArtifactEntity a where a.bucket = 'local' and a.runId in (select r.id from RunEntity r where r.projectId = :project)",

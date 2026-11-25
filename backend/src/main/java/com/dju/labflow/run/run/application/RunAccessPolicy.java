@@ -2,6 +2,7 @@ package com.dju.labflow.run.run.application;
 
 import com.dju.labflow.global.validation.InputValidation;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.run.run.domain.Run;
@@ -34,7 +35,7 @@ public class RunAccessPolicy {
     public Run requireOwnedForUpdate(ProjectApiKeyPrincipal principal, RunId runId) {
         InputValidation.required(principal, "SDK principal");
         // 프로젝트 → 실행 순서로 잠가 삭제 후 고아 기록이 생성되지 않도록 한다.
-        var project =
+        Project project =
                 projectRepository
                         .findByIdForUpdate(
                                 InputValidation.required(principal.projectId(), "Project ID"))

@@ -4,6 +4,7 @@ import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.global.validation.InputValidation;
 import com.dju.labflow.global.validation.RequestValidator;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.run.run.domain.*;
@@ -43,7 +44,7 @@ public class RunService {
     public RunId create(ProjectApiKeyPrincipal principal, RunCreateCommand command) {
         InputValidation.required(principal, "SDK principal");
         requestValidator.validate(command);
-        var project =
+        Project project =
                 projectRepository
                         .findByIdForUpdate(principal.projectId())
                         .orElseThrow(ProjectNotFoundException::new);

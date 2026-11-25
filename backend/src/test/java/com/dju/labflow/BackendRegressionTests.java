@@ -6,10 +6,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.dju.labflow.auth.application.AuthService;
 import com.dju.labflow.auth.application.LoginCommand;
+import com.dju.labflow.auth.application.LoginResult;
 import com.dju.labflow.auth.application.SignUpCommand;
 import com.dju.labflow.auth.application.token.TokenRefreshService;
 import com.dju.labflow.auth.domain.RefreshTokenHasher;
 import com.dju.labflow.auth.domain.RefreshTokenRepository;
+import com.dju.labflow.auth.domain.TokenRefreshResult;
 import com.dju.labflow.auth.domain.exception.EmailVerificationRequiredException;
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.auth.infrastructure.persistence.JwtAuthenticationFilter;
@@ -28,9 +30,11 @@ import com.dju.labflow.user.domain.repository.UserRepository;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import com.dju.labflow.user.infrastructure.security.CustomUserDetailsService;
 import jakarta.persistence.EntityManager;
+import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
 import jakarta.validation.ConstraintViolationException;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -39,6 +43,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
@@ -74,8 +79,8 @@ class BackendRegressionTests {
     @Test
     void activeAccountCanLoginAndRotateTokens() {
         User user = saveUser(1L, AccountStatus.ACTIVE);
-        var login = authService.login(new LoginCommand(user.getEmail(), PASSWORD));
-        var refreshed = tokenRefreshService.refresh(login.refreshToken());
+        LoginResult login = authService.login(new LoginCommand(user.getEmail(), PASSWORD));
+        TokenRefreshResult refreshed = tokenRefreshService.refresh(login.refreshToken());
         assertThat(refreshed.refreshToken()).isNotEqualTo(login.refreshToken());
         assertThat(
                         refreshTokens
@@ -107,7 +112,7 @@ class BackendRegressionTests {
             names = {"BLOCKED", "PENDING_VERIFICATION"})
     void nonActiveAccountCannotRefreshOrConsumeExistingToken(AccountStatus status) {
         User user = saveUser(1L, AccountStatus.ACTIVE);
-        var login = authService.login(new LoginCommand(user.getEmail(), PASSWORD));
+        LoginResult login = authService.login(new LoginCommand(user.getEmail(), PASSWORD));
         users.update(
                 User.restore(
                         user.getId(),
@@ -224,7 +229,8 @@ class BackendRegressionTests {
 
     @Test
     void signupCreatesPendingAccountAndRejectsDuplicateEmail() {
-        var command = new SignUpCommand("new@example.test", PASSWORD, PASSWORD, "new user");
+        SignUpCommand command =
+                new SignUpCommand("new@example.test", PASSWORD, PASSWORD, "new user");
         UserId id = authService.signUp(command);
         User user = users.findById(id).orElseThrow();
         assertThat(user.getAccountStatus()).isEqualTo(AccountStatus.PENDING_VERIFICATION);
@@ -309,7 +315,7 @@ class BackendRegressionTests {
                                 .contentType("application/json")
                                 .content("{\"name\":\"test\"}"))
                 .andExpect(status().isForbidden());
-        var response =
+        MockHttpServletResponse response =
                 mvc.perform(get("/api/v1/auth/csrf"))
                         .andExpect(status().isOk())
                         .andExpect(cookie().exists("XSRF-TOKEN"))
@@ -363,7 +369,7 @@ class BackendRegressionTests {
 
     @Test
     void projectDomainRejectsInvalidInputWithoutPartiallyUpdatingState() {
-        var owner = UserId.of(1L);
+        UserId owner = UserId.of(1L);
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         assertThatThrownBy(
                         () ->
@@ -410,7 +416,7 @@ class BackendRegressionTests {
                         context.getBean("apiKeyFilterRegistration", FilterRegistrationBean.class)
                                 .isEnabled())
                 .isFalse();
-        var filters = context.getBean(FilterChainProxy.class).getFilters(ISSUE_URL);
+        List<Filter> filters = context.getBean(FilterChainProxy.class).getFilters(ISSUE_URL);
         assertThat(filters.stream().filter(JwtAuthenticationFilter.class::isInstance).count())
                 .isEqualTo(1);
         assertThat(

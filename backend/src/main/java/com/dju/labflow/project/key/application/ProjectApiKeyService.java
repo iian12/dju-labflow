@@ -91,7 +91,7 @@ public class ProjectApiKeyService {
     public KeyPage list(UserId requester, ProjectId projectId, int page, int size) {
         if (page < 0 || size < 1 || size > 100)
             throw new IllegalArgumentException("Invalid key page");
-        var project =
+        Project project =
                 projectRepository.findById(projectId).orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(requester))
             throw new AccessDeniedException("Only owner can read keys");
@@ -106,13 +106,13 @@ public class ProjectApiKeyService {
 
     @Transactional
     public void revoke(UserId requester, ProjectId projectId, ProjectApiKeyId keyId) {
-        var project =
+        Project project =
                 projectRepository
                         .findByIdForUpdate(projectId)
                         .orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(requester))
             throw new AccessDeniedException("Only owner can revoke keys");
-        var key =
+        ProjectApiKey key =
                 projectApiKeyRepository
                         .findById(keyId)
                         .filter(value -> value.getProjectId().equals(projectId))

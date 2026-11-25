@@ -41,7 +41,8 @@ public class ProjectKeyManagementController {
             @PathVariable @Positive Long projectId,
             @RequestParam(defaultValue = "0") @PositiveOrZero int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        var result = service.list(user, ProjectId.of(projectId), page, size);
+        ProjectApiKeyService.KeyPage result =
+                service.list(user, ProjectId.of(projectId), page, size);
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .body(

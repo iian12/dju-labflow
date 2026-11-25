@@ -1,8 +1,10 @@
 package com.dju.labflow.auth.application.token;
 
+import com.dju.labflow.auth.domain.RefreshToken;
 import com.dju.labflow.auth.domain.RefreshTokenHasher;
 import com.dju.labflow.auth.domain.RefreshTokenRepository;
 import java.time.Clock;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +29,7 @@ public class TokenLogoutService {
     @Transactional
     public void logout(@Nullable String rawRefreshToken) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) return;
-        var token =
+        Optional<RefreshToken> token =
                 refreshTokenRepository.findByTokenHashForUpdate(
                         refreshTokenHasher.hash(rawRefreshToken));
         if (token.isPresent() && !token.get().isRevoked())

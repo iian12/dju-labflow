@@ -21,6 +21,7 @@ import com.dju.labflow.user.exception.DuplicateEmailException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Optional;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -112,7 +113,7 @@ public class AuthService {
         } catch (DisabledException exception) {
             // Spring checks disabled status before the password. Only reveal the
             // verification state after independently checking the supplied password.
-            var pending = userRepository.findByEmail(command.email());
+            Optional<User> pending = userRepository.findByEmail(command.email());
             if (pending.isPresent()
                     && pending.get().getAccountStatus() == AccountStatus.PENDING_VERIFICATION
                     && passwordEncoder.matches(

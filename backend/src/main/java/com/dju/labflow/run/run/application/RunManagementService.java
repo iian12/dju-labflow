@@ -1,10 +1,13 @@
 package com.dju.labflow.run.run.application;
 
 import com.dju.labflow.auth.application.AccountAccessPolicy;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
+import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.run.run.domain.RunStatus;
 import com.dju.labflow.run.run.domain.repository.RunRepository;
 import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.user.domain.UserId;
@@ -36,15 +39,15 @@ public class RunManagementService {
     public void stop(UserId user, ProjectId projectId, RunId runId) {
         AccountAccessPolicy.requireActive(
                 users.findById(user).orElseThrow(UserNotFoundException::new));
-        var project =
+        Project project =
                 projects.findByIdForUpdate(projectId).orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(user))
             throw new AccessDeniedException("Only the project owner can stop runs");
-        var run =
+        Run run =
                 runs.findByIdForUpdate(runId)
                         .filter(candidate -> candidate.getProjectId().equals(projectId))
                         .orElseThrow(RunNotFoundException::new);
-        var previous = run.getStatus();
+        RunStatus previous = run.getStatus();
         run.fail(STOP_REASON, clock.instant());
         if (previous != run.getStatus()) runs.update(run);
     }

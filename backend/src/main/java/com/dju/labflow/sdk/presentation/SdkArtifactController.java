@@ -3,6 +3,7 @@ package com.dju.labflow.sdk.presentation;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
 import com.dju.labflow.run.artifact.application.LocalArtifactService;
 import com.dju.labflow.run.artifact.domain.ArtifactKind;
+import com.dju.labflow.run.artifact.domain.RunArtifact;
 import com.dju.labflow.run.run.domain.RunId;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -30,7 +31,7 @@ public class SdkArtifactController {
             @RequestHeader("X-Request-ID") String requestId,
             HttpServletRequest request)
             throws IOException {
-        var artifact =
+        RunArtifact artifact =
                 files.upload(
                         principal,
                         RunId.of(runId),
@@ -47,7 +48,7 @@ public class SdkArtifactController {
             @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
             @PathVariable long runId,
             @PathVariable long artifactId) {
-        var file = files.download(principal, RunId.of(runId), artifactId);
+        LocalArtifactService.Download file = files.download(principal, RunId.of(runId), artifactId);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .contentLength(file.metadata().getSizeBytes())

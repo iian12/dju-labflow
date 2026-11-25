@@ -45,7 +45,7 @@ public class RunSummaryRepositoryImpl implements RunSummaryRepository {
                         .getResultList();
         Map<Long, List<RunMetric>> values = new HashMap<>();
         for (Object row : rows) {
-            var metric = (RunMetricEntity) row;
+            RunMetricEntity metric = (RunMetricEntity) row;
             values.computeIfAbsent(metric.getRunId(), id -> new ArrayList<>())
                     .add(RunMetricMapper.toDomain(metric));
         }

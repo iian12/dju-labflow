@@ -3,6 +3,7 @@ package com.dju.labflow.auth.presentation;
 import com.dju.labflow.global.resolver.CurrentUserId;
 import com.dju.labflow.user.application.UserService;
 import com.dju.labflow.user.domain.Role;
+import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.UserId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -23,7 +24,7 @@ public class SessionController {
     @GetMapping("/api/v1/auth/me")
     @Operation(summary = "현재 로그인 사용자")
     public ResponseEntity<Session> me(@Parameter(hidden = true) @CurrentUserId UserId id) {
-        var user = users.get(id);
+        User user = users.get(id);
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .body(new Session(id.value(), user.getName(), user.getEmail(), user.getRole()));

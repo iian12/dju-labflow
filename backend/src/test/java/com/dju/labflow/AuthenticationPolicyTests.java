@@ -51,8 +51,9 @@ class AuthenticationPolicyTests {
     void jwtUsesCurrentRoleInsteadOfPreviouslyIssuedAdminClaim() throws Exception {
         User current = user(AccountStatus.ACTIVE);
         when(users.findById(current.getId())).thenReturn(Optional.of(current));
-        var filter = new JwtAuthenticationFilter(tokens, users);
-        var request = requestWithToken(tokens.createAccessToken(current.getId(), Role.ADMIN));
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(tokens, users);
+        MockHttpServletRequest request =
+                requestWithToken(tokens.createAccessToken(current.getId(), Role.ADMIN));
         filter.doFilter(
                 request,
                 new MockHttpServletResponse(),
@@ -71,8 +72,8 @@ class AuthenticationPolicyTests {
     void jwtDoesNotRetryDownstreamRequestWhenApplicationThrowsIllegalArgument() {
         User current = user(AccountStatus.ACTIVE);
         when(users.findById(current.getId())).thenReturn(Optional.of(current));
-        var filter = new JwtAuthenticationFilter(tokens, users);
-        var calls = new AtomicInteger();
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(tokens, users);
+        AtomicInteger calls = new AtomicInteger();
         assertThatThrownBy(
                         () ->
                                 filter.doFilter(
@@ -90,7 +91,7 @@ class AuthenticationPolicyTests {
 
     @Test
     void malformedJwtContinuesOnceWithoutAuthentication() throws Exception {
-        var calls = new AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         new JwtAuthenticationFilter(tokens, users)
                 .doFilter(
                         requestWithToken("invalid-jwt"),
@@ -107,8 +108,8 @@ class AuthenticationPolicyTests {
     @ParameterizedTest
     @EnumSource(AccountStatus.class)
     void sdkKeyRequiresAnActiveOwner(AccountStatus status) {
-        var keys = mock(ProjectApiKeyRepository.class);
-        var hasher = new ProjectApiKeyHasher();
+        ProjectApiKeyRepository keys = mock(ProjectApiKeyRepository.class);
+        ProjectApiKeyHasher hasher = new ProjectApiKeyHasher();
         String raw = "test-api-key";
         ProjectApiKey key =
                 ProjectApiKey.create(
@@ -125,7 +126,8 @@ class AuthenticationPolicyTests {
         when(keys.findByKeyHash(hasher.hash(raw))).thenReturn(Optional.of(key));
         when(users.findById(UserId.of(1L))).thenReturn(Optional.of(user(status)));
         when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(true);
-        var service = new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
+        ProjectApiKeyAuthenticationService service =
+                new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
         if (status == AccountStatus.ACTIVE) {
             assertThat(service.authenticate(raw).projectId()).isEqualTo(ProjectId.of(10L));
         } else {
@@ -137,8 +139,8 @@ class AuthenticationPolicyTests {
 
     @Test
     void sdkAuthenticationFailsIfKeyIsRevokedBeforeUsageIsRecorded() {
-        var keys = mock(ProjectApiKeyRepository.class);
-        var hasher = new ProjectApiKeyHasher();
+        ProjectApiKeyRepository keys = mock(ProjectApiKeyRepository.class);
+        ProjectApiKeyHasher hasher = new ProjectApiKeyHasher();
         String raw = "revoked-during-authentication";
         ProjectApiKey key =
                 ProjectApiKey.create(
@@ -157,13 +159,14 @@ class AuthenticationPolicyTests {
                 .thenReturn(Optional.of(user(AccountStatus.ACTIVE)));
         when(keys.recordUsage(key.getId(), clock.instant())).thenReturn(false);
 
-        var service = new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
+        ProjectApiKeyAuthenticationService service =
+                new ProjectApiKeyAuthenticationService(keys, hasher, users, clock);
         assertThatThrownBy(() -> service.authenticate(raw))
                 .isInstanceOf(InvalidProjectApiKeyException.class);
     }
 
     private MockHttpServletRequest requestWithToken(String token) {
-        var request = new MockHttpServletRequest("GET", "/api/private");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/private");
         request.setCookies(new Cookie("access_token", token));
         return request;
     }

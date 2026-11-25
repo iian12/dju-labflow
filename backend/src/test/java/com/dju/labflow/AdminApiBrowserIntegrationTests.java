@@ -3,6 +3,7 @@ package com.dju.labflow;
 import static org.assertj.core.api.Assertions.*;
 
 import com.dju.labflow.global.id.IdGenerator;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.repository.*;
 import com.dju.labflow.user.domain.*;
 import com.dju.labflow.user.domain.repository.UserRepository;
@@ -40,8 +41,9 @@ class AdminApiBrowserIntegrationTests {
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status -> {
-                            for (var project : projects.findByCreatedBy(owner, 0, 100).items()) {
-                                var locked =
+                            for (Project project :
+                                    projects.findByCreatedBy(owner, 0, 100).items()) {
+                                Project locked =
                                         projects.findByIdForUpdate(project.getId()).orElseThrow();
                                 contents.deleteByProjectId(project.getId());
                                 projects.delete(locked);
@@ -69,7 +71,7 @@ class AdminApiBrowserIntegrationTests {
                         AccountStatus.ACTIVE));
         Path frontend = Path.of("..", "frontend").toAbsolutePath().normalize();
         Path output = Path.of("build", "admin-api-browser.log").toAbsolutePath();
-        var builder =
+        ProcessBuilder builder =
                 new ProcessBuilder(
                         System.getenv("LABFLOW_ADMIN_NODE"), "tests/api-workbench.backend.ts");
         builder.directory(frontend.toFile());

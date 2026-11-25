@@ -4,6 +4,7 @@ import com.dju.labflow.global.resolver.CurrentUserId;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.run.artifact.application.LocalArtifactService;
 import com.dju.labflow.run.artifact.domain.ArtifactStatus;
+import com.dju.labflow.run.artifact.infrastructure.persistence.RunArtifactEntity;
 import com.dju.labflow.run.artifact.infrastructure.persistence.RunArtifactJpaRepository;
 import com.dju.labflow.run.run.application.RunQueryService;
 import com.dju.labflow.run.run.domain.RunId;
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -44,7 +46,7 @@ public class RunArtifactQueryController {
             @RequestParam(defaultValue = "0") @PositiveOrZero int page,
             @RequestParam(defaultValue = "100") @Min(1) @Max(100) int size) {
         runs.get(user, ProjectId.of(projectId), RunId.of(runId));
-        var result =
+        Page<RunArtifactEntity> result =
                 artifacts.findByRunIdAndStatusAndBucketOrderByIdAsc(
                         runId, ArtifactStatus.READY, "local", PageRequest.of(page, size));
         return new Listing(
@@ -62,7 +64,7 @@ public class RunArtifactQueryController {
             @PathVariable long runId,
             @PathVariable long artifactId) {
         runs.get(user, ProjectId.of(projectId), RunId.of(runId));
-        var file = files.localDownload(RunId.of(runId), artifactId);
+        LocalArtifactService.Download file = files.localDownload(RunId.of(runId), artifactId);
         String name = file.metadata().getName().replaceAll("[\\p{Cntrl}/\\\\]", "_");
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())

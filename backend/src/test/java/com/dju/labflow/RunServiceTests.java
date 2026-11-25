@@ -9,8 +9,10 @@ import com.dju.labflow.run.log.application.RunLogCommand;
 import com.dju.labflow.run.log.domain.*;
 import com.dju.labflow.run.log.domain.repository.RunLogRepository;
 import com.dju.labflow.run.metric.application.RunMetricCommand;
+import com.dju.labflow.run.metric.domain.RunMetricId;
 import com.dju.labflow.run.metric.domain.repository.RunMetricRepository;
 import com.dju.labflow.run.parameter.application.RunParameterCommand;
+import com.dju.labflow.run.parameter.domain.RunParameterId;
 import com.dju.labflow.run.parameter.domain.repository.RunParameterRepository;
 import com.dju.labflow.run.run.application.*;
 import com.dju.labflow.run.run.domain.*;
@@ -66,13 +68,13 @@ class RunServiceTests {
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status -> {
-                            var entities =
+                            List<RunEntity> entities =
                                     em.createQuery(
                                                     "select r from RunEntity r where r.createdBy in :ids",
                                                     RunEntity.class)
                                             .setParameter("ids", owners)
                                             .getResultList();
-                            var ids = entities.stream().map(RunEntity::getId).toList();
+                            List<Long> ids = entities.stream().map(RunEntity::getId).toList();
                             if (!ids.isEmpty()) {
                                 for (String entity :
                                         List.of(
@@ -108,7 +110,7 @@ class RunServiceTests {
 
     @Test
     void completeLifecyclePersistsAllRecordTypesAndMetadata() {
-        var principal = principal();
+        ProjectApiKeyPrincipal principal = principal();
         RunId id = create(principal);
         records.parameters(principal, id, new RunParameterCommand(Map.of("optimizer", "adam")));
         records.metrics(principal, id, metric(0.125));
@@ -165,7 +167,7 @@ class RunServiceTests {
 
     @Test
     void failedRunPreservesReasonAndRejectsConflictingTerminalTransition() {
-        var principal = principal();
+        ProjectApiKeyPrincipal principal = principal();
         RunId id = create(principal);
         runService.fail(principal, id, new RunFailCommand("out of memory"));
         runService.fail(principal, id, new RunFailCommand("out of memory"));
@@ -176,7 +178,7 @@ class RunServiceTests {
 
     @Test
     void endedRunRejectsEveryRecordType() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
         runService.complete(p, id);
         assertThatThrownBy(
@@ -206,9 +208,9 @@ class RunServiceTests {
 
     @Test
     void publicProjectDoesNotAllowAnotherProjectsKeyToReadWriteOrEndRuns() {
-        var owner = principal();
+        ProjectApiKeyPrincipal owner = principal();
         RunId id = create(owner);
-        var other = principal();
+        ProjectApiKeyPrincipal other = principal();
         assertThatThrownBy(() -> runService.get(other, id))
                 .isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> runService.complete(other, id))
@@ -245,12 +247,13 @@ class RunServiceTests {
 
     @Test
     void parameterRetriesAreIdempotentAndChangesRollBackTheWholeBatch() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
-        var first = records.parameters(p, id, new RunParameterCommand(Map.of("optimizer", "adam")));
+        List<RunParameterId> first =
+                records.parameters(p, id, new RunParameterCommand(Map.of("optimizer", "adam")));
         assertThat(records.parameters(p, id, new RunParameterCommand(Map.of("optimizer", "adam"))))
                 .isEqualTo(first);
-        var changes = new LinkedHashMap<String, String>();
+        LinkedHashMap<String, String> changes = new LinkedHashMap<>();
         changes.put("new_parameter", "new value");
         changes.put("optimizer", "sgd");
         assertThatThrownBy(() -> records.parameters(p, id, new RunParameterCommand(changes)))
@@ -262,9 +265,9 @@ class RunServiceTests {
 
     @Test
     void parameterLimitAppliesAcrossBatches() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
-        var batch = new HashMap<String, String>();
+        HashMap<String, String> batch = new HashMap<>();
         for (int i = 0; i < 100; i++) batch.put("p" + i, "v");
         records.parameters(p, id, new RunParameterCommand(batch));
         assertThatThrownBy(
@@ -277,9 +280,9 @@ class RunServiceTests {
 
     @Test
     void invalidMetricRollsBackEarlierInsertsInTheSameBatch() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
-        var batch = new LinkedHashMap<String, Double>();
+        LinkedHashMap<String, Double> batch = new LinkedHashMap<>();
         batch.put("valid", 1.0);
         batch.put("invalid", Double.NaN);
         assertThatThrownBy(
@@ -292,7 +295,7 @@ class RunServiceTests {
 
     @Test
     void staleRunCannotReplaceCommittedTerminalState() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
         Run stale = runs.findById(id).orElseThrow();
         runService.complete(p, id);
@@ -304,7 +307,7 @@ class RunServiceTests {
 
     @Test
     void queriesHaveBoundedDeterministicOrdering() {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
         Instant at = Instant.parse("2026-01-01T00:00:00Z");
         records.metrics(
@@ -325,13 +328,13 @@ class RunServiceTests {
 
     @Test
     void appendWaitingForTerminationCannotWriteAfterCompletion() throws Exception {
-        var p = principal();
+        ProjectApiKeyPrincipal p = principal();
         RunId id = create(p);
-        var locked = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var appendStarted = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var finish =
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch appendStarted = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> finish =
                     executor.submit(
                             () ->
                                     new TransactionTemplate(transactions)
@@ -347,7 +350,7 @@ class RunServiceTests {
                                                     }));
             try {
                 assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
-                var append =
+                Future<List<RunMetricId>> append =
                         executor.submit(
                                 () -> {
                                     appendStarted.countDown();

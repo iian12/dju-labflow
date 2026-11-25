@@ -8,6 +8,7 @@ import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.user.domain.UserId;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -72,7 +73,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     @Override
     public ProjectPage findByCreatedBy(UserId ownerId, int page, int size) {
         Objects.requireNonNull(ownerId, "Owner ID must not be null");
-        var result =
+        Page<ProjectEntity> result =
                 projectJpaRepository.findByCreatedBy(
                         ownerId.value(),
                         PageRequest.of(

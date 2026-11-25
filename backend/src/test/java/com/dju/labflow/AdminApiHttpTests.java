@@ -36,7 +36,7 @@ class AdminApiHttpTests {
 
     @Test
     void regularUsersAreDeniedAndSessionReturnsTheirCurrentRole() throws Exception {
-        var user = user(Role.USER);
+        User user = user(Role.USER);
         mvc.perform(get("/api/v1/admin/api-test").cookie(cookie(user)))
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/auth/me").cookie(cookie(user)))
@@ -46,8 +46,8 @@ class AdminApiHttpTests {
 
     @Test
     void adminsReceiveCurrentControllerOperationsWithoutSecrets() throws Exception {
-        var user = user(Role.ADMIN);
-        var response =
+        User user = user(Role.ADMIN);
+        String response =
                 mvc.perform(get("/api/v1/admin/api-test").cookie(cookie(user)))
                         .andExpect(status().isOk())
                         .andExpect(header().string("Cache-Control", "no-store"))
@@ -67,8 +67,8 @@ class AdminApiHttpTests {
 
     @Test
     void revokingAdminRejectsTheExistingAdminJwtOnTheNextRequest() throws Exception {
-        var user = user(Role.ADMIN);
-        var jwt = cookie(user);
+        User user = user(Role.ADMIN);
+        Cookie jwt = cookie(user);
         user.revokeAdmin();
         users.update(user);
         mvc.perform(get("/api/v1/admin/api-test").cookie(jwt)).andExpect(status().isForbidden());
@@ -77,16 +77,16 @@ class AdminApiHttpTests {
 
     @Test
     void blockedAdminCannotAccessWithAnExistingJwt() throws Exception {
-        var user = user(Role.ADMIN);
-        var jwt = cookie(user);
+        User user = user(Role.ADMIN);
+        Cookie jwt = cookie(user);
         user.block();
         users.update(user);
         mvc.perform(get("/api/v1/admin/api-test").cookie(jwt)).andExpect(status().isUnauthorized());
     }
 
     private User user(Role role) {
-        var id = UserId.of(ids.nextId());
-        var user =
+        UserId id = UserId.of(ids.nextId());
+        User user =
                 User.restore(
                         id,
                         "admin-test-" + id.value() + "@example.test",

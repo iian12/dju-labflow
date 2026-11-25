@@ -4,10 +4,16 @@ import static org.assertj.core.api.Assertions.*;
 
 import com.dju.labflow.run.log.infrastructure.persistence.RunLogEntity;
 import com.dju.labflow.run.text.infrastructure.persistence.RunTextEntity;
+import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.HashSet;
+import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
+import org.hibernate.boot.registry.StandardServiceRegistry;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.FileSystemResource;
@@ -17,12 +23,12 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 class RunSchemaTests {
     @Test
     void sdkRequestMigrationIsRepeatableAndScopesIdentityToProject() throws Exception {
-        try (var connection =
+        try (Connection connection =
                 DriverManager.getConnection("jdbc:h2:mem:sdk-request-ddl;MODE=MariaDB", "sa", "")) {
-            var migration = new FileSystemResource("database/sdk-requests.sql");
+            FileSystemResource migration = new FileSystemResource("database/sdk-requests.sql");
             ScriptUtils.executeSqlScript(connection, migration);
             ScriptUtils.executeSqlScript(connection, migration);
-            try (var statement = connection.createStatement()) {
+            try (Statement statement = connection.createStatement()) {
                 statement.executeUpdate(
                         "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
                                 + "values(1,1,'key','hash',1,current_timestamp)");
@@ -43,10 +49,10 @@ class RunSchemaTests {
 
     @Test
     void heartbeatMigrationPreservesExistingRuns() throws Exception {
-        try (var connection =
+        try (Connection connection =
                 DriverManager.getConnection("jdbc:h2:mem:heartbeat-ddl;MODE=MariaDB", "sa", "")) {
             ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
-            try (var statement = connection.createStatement()) {
+            try (Statement statement = connection.createStatement()) {
                 statement.execute("alter table run_entity drop column last_heartbeat_at");
                 statement.executeUpdate(
                         "insert into run_entity(id,version,project_id,created_by,name,status,started_at) "
@@ -54,8 +60,8 @@ class RunSchemaTests {
             }
             ScriptUtils.executeSqlScript(
                     connection, new FileSystemResource("database/run-heartbeat.sql"));
-            try (var statement = connection.createStatement();
-                    var result =
+            try (Statement statement = connection.createStatement();
+                    ResultSet result =
                             statement.executeQuery(
                                     "select name,last_heartbeat_at from run_entity where id=1")) {
                 assertThat(result.next()).isTrue();
@@ -67,13 +73,13 @@ class RunSchemaTests {
 
     @Test
     void mariaDbMappingDoesNotShrinkTextAndLogColumnsToTinytext() {
-        var registry =
+        StandardServiceRegistry registry =
                 new StandardServiceRegistryBuilder()
                         .applySetting("hibernate.dialect", "org.hibernate.dialect.MariaDBDialect")
                         .applySetting("hibernate.boot.allow_jdbc_metadata_access", false)
                         .build();
         try {
-            var metadata =
+            Metadata metadata =
                     new MetadataSources(registry)
                             .addAnnotatedClass(RunTextEntity.class)
                             .addAnnotatedClass(RunLogEntity.class)
@@ -99,11 +105,11 @@ class RunSchemaTests {
 
     @Test
     void deploymentDdlCreatesAllTablesAndEnforcesParameterIdentity() throws Exception {
-        try (var connection =
+        try (Connection connection =
                 DriverManager.getConnection("jdbc:h2:mem:run-ddl;MODE=MariaDB", "sa", "")) {
             ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
-            var tables = new HashSet<String>();
-            try (var result =
+            HashSet<String> tables = new HashSet<>();
+            try (ResultSet result =
                     connection
                             .getMetaData()
                             .getTables(null, "PUBLIC", "%", new String[] {"TABLE"})) {
@@ -120,7 +126,7 @@ class RunSchemaTests {
                             "RUN_ARTIFACT_ENTITY",
                             "RUN_SYSTEM_METRIC_ENTITY",
                             "RUN_SYSTEM_METRIC_GPU");
-            try (var statement = connection.createStatement()) {
+            try (Statement statement = connection.createStatement()) {
                 statement.executeUpdate(
                         "insert into run_parameter_entity(id,run_id,parameter_key,parameter_value,created_at) values(1,1,'optimizer','adam',current_timestamp)");
                 assertThatThrownBy(
@@ -135,10 +141,10 @@ class RunSchemaTests {
     @Test
     void deploymentArtifactDdlEnforcesRequestAndStorageIdentityWithoutUniqueFileNames()
             throws Exception {
-        try (var connection =
+        try (Connection connection =
                 DriverManager.getConnection("jdbc:h2:mem:artifact-ddl;MODE=MariaDB", "sa", "")) {
             ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
-            try (var insert =
+            try (PreparedStatement insert =
                     connection.prepareStatement(
                             "insert into run_artifact_entity(id,version,run_id,name,kind,content_type,"
                                     + "expected_size_bytes,bucket,object_key,status,client_request_id,created_at,upload_expires_at) "

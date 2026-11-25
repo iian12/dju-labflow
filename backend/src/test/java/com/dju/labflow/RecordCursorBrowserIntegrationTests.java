@@ -94,8 +94,10 @@ class RecordCursorBrowserIntegrationTests {
                         owner,
                         ProjectVisibility.PRIVATE,
                         Instant.now()));
-        var key = issuance.issue(owner, project, new IssueProjectApiKeyCommand("records-test"));
-        var principal = new ProjectApiKeyPrincipal(key.apiKeyId(), project, owner);
+        IssueProjectApiKeyResult key =
+                issuance.issue(owner, project, new IssueProjectApiKeyCommand("records-test"));
+        ProjectApiKeyPrincipal principal =
+                new ProjectApiKeyPrincipal(key.apiKeyId(), project, owner);
         RunId run = runs.create(principal, new RunCreateCommand("Long training", Map.of()));
         Instant when = Instant.now().minusSeconds(3600);
         new TransactionTemplate(transactions)

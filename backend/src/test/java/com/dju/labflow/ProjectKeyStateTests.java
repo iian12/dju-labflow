@@ -3,6 +3,7 @@ package com.dju.labflow;
 import static org.assertj.core.api.Assertions.*;
 
 import com.dju.labflow.project.key.application.IssueProjectApiKeyCommand;
+import com.dju.labflow.project.key.application.IssueProjectApiKeyResult;
 import com.dju.labflow.project.key.application.ProjectApiKeyAuthenticationService;
 import com.dju.labflow.project.key.application.ProjectApiKeyService;
 import com.dju.labflow.project.key.domain.*;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -123,7 +125,7 @@ class ProjectKeyStateTests {
     @Test
     void issuedKeyIsUnusedUntilSuccessfulAuthentication() {
         Project p = fixture(AccountStatus.ACTIVE);
-        var issued =
+        IssueProjectApiKeyResult issued =
                 issuance.issue(p.getCreatedBy(), p.getId(), new IssueProjectApiKeyCommand("sdk"));
         String hash = hasher.hash(issued.rawApiKey());
         assertThat(keys.findByKeyHash(hash).orElseThrow().getLastUsedAt()).isNull();
@@ -179,8 +181,8 @@ class ProjectKeyStateTests {
     @Test
     void concurrentAuthenticationsDoNotFailOnUsageVersionConflicts() throws Exception {
         ProjectApiKey k = keys.save(key(fixture(AccountStatus.ACTIVE)));
-        var start = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(4)) {
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(4)) {
             List<Future<ProjectApiKeyPrincipal>> calls = new ArrayList<>();
             for (int i = 0; i < 4; i++) {
                 calls.add(
@@ -192,7 +194,7 @@ class ProjectKeyStateTests {
                                 }));
             }
             start.countDown();
-            for (var call : calls) {
+            for (Future<ProjectApiKeyPrincipal> call : calls) {
                 assertThat(call.get(10, TimeUnit.SECONDS).projectId()).isEqualTo(k.getProjectId());
             }
         }

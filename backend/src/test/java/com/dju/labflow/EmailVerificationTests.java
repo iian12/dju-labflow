@@ -15,9 +15,11 @@ import com.dju.labflow.auth.application.verification.VerificationEmailSender;
 import com.dju.labflow.auth.domain.EmailVerification;
 import com.dju.labflow.auth.domain.EmailVerificationRepository;
 import com.dju.labflow.auth.domain.exception.InvalidVerificationCodeException;
+import com.dju.labflow.auth.infrastructure.persistence.EmailVerificationEntity;
 import com.dju.labflow.auth.infrastructure.persistence.EmailVerificationJpaRepository;
 import com.dju.labflow.auth.infrastructure.persistence.EmailVerificationMapper;
 import com.dju.labflow.user.domain.AccountStatus;
+import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import java.time.Instant;
 import java.util.UUID;
@@ -67,13 +69,15 @@ class EmailVerificationTests {
     void repositoryPreservesInsertOnlySemanticsAndAssignedIdLifecycle() {
         String email = signUp();
         Long userId = users.findByEmail(email).orElseThrow().getId().value();
-        var transactions = new TransactionTemplate(transactionManager);
+        TransactionTemplate transactions = new TransactionTemplate(transactionManager);
         transactions.executeWithoutResult(
                 status -> {
-                    var entity = verificationJpaRepository.findById(userId).orElseThrow();
+                    EmailVerificationEntity entity =
+                            verificationJpaRepository.findById(userId).orElseThrow();
                     assertThat(entity.isNew()).isFalse();
-                    var token = verificationRepository.findForUpdate(userId).orElseThrow();
-                    var mapped = EmailVerificationMapper.toEntity(token);
+                    EmailVerification token =
+                            verificationRepository.findForUpdate(userId).orElseThrow();
+                    EmailVerificationEntity mapped = EmailVerificationMapper.toEntity(token);
                     assertThat(mapped.isNew()).isTrue();
                     assertThat(EmailVerificationMapper.toDomain(mapped))
                             .usingRecursiveComparison()
@@ -110,7 +114,7 @@ class EmailVerificationTests {
         verify(sender).send(email, "A2B3C4");
         assertThat(users.findByEmail(email).orElseThrow().getAccountStatus())
                 .isEqualTo(AccountStatus.PENDING_VERIFICATION);
-        var id = users.findByEmail(email).orElseThrow().getId().value();
+        Long id = users.findByEmail(email).orElseThrow().getId().value();
         assertThat(
                         jdbc.queryForObject(
                                 "select code_hash from email_verifications where user_id = ?",
@@ -132,7 +136,7 @@ class EmailVerificationTests {
             assertThatThrownBy(() -> service.verify(email, "Z9Z9Z9"))
                     .isInstanceOf(InvalidVerificationCodeException.class);
         }
-        var id = users.findByEmail(email).orElseThrow().getId().value();
+        Long id = users.findByEmail(email).orElseThrow().getId().value();
         assertThat(
                         jdbc.queryForObject(
                                 "select failures from email_verifications where user_id = ?",
@@ -148,7 +152,7 @@ class EmailVerificationTests {
         String email = signUp();
         service.resend(email);
         verify(sender, times(1)).send(eq(email), anyString());
-        var id = users.findByEmail(email).orElseThrow().getId().value();
+        Long id = users.findByEmail(email).orElseThrow().getId().value();
         jdbc.update(
                 "update email_verifications set sent_at = ? where user_id = ?",
                 java.sql.Timestamp.from(Instant.now().minusSeconds(61)),
@@ -163,7 +167,7 @@ class EmailVerificationTests {
     @Test
     void expiredAndBlockedAccountsCannotVerify() {
         String email = signUp();
-        var user = users.findByEmail(email).orElseThrow();
+        User user = users.findByEmail(email).orElseThrow();
         jdbc.update(
                 "update email_verifications set expires_at = ? where user_id = ?",
                 java.sql.Timestamp.from(Instant.now().minusSeconds(1)),
@@ -171,7 +175,7 @@ class EmailVerificationTests {
         assertThatThrownBy(() -> service.verify(email, "A2B3C4"))
                 .isInstanceOf(InvalidVerificationCodeException.class);
         String blockedEmail = signUp();
-        var blocked = users.findByEmail(blockedEmail).orElseThrow();
+        User blocked = users.findByEmail(blockedEmail).orElseThrow();
         blocked.block();
         users.update(blocked);
         assertThatThrownBy(() -> service.verify(blockedEmail, "D5E6F7"))
@@ -232,12 +236,12 @@ class EmailVerificationTests {
 
     @Test
     void codeGenerationAndDomainLimits() {
-        var actual = new EmailVerificationCodeGenerator();
+        EmailVerificationCodeGenerator actual = new EmailVerificationCodeGenerator();
         for (int i = 0; i < 1000; i++) {
             assertThat(actual.generate()).matches("(?=.*[A-Z])(?=.*[2-9])[A-HJKMNP-Z2-9]{6}");
         }
         Instant now = Instant.parse("2026-10-29T00:00:00Z");
-        var token = EmailVerification.issue(1L, "hash", now);
+        EmailVerification token = EmailVerification.issue(1L, "hash", now);
         assertThat(token.usable(now.plusSeconds(600))).isFalse();
         for (int i = 1; i <= 4; i++) token.resend("hash", now.plusSeconds(60L * i));
         assertThat(token.canResend(now.plusSeconds(300))).isFalse();

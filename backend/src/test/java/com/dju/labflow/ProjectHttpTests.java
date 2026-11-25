@@ -17,12 +17,14 @@ import com.dju.labflow.project.project.presentation.*;
 import com.dju.labflow.run.log.application.RunLogCommand;
 import com.dju.labflow.run.log.domain.*;
 import com.dju.labflow.run.metric.application.RunMetricCommand;
+import com.dju.labflow.run.metric.domain.RunMetricId;
 import com.dju.labflow.run.parameter.application.RunParameterCommand;
 import com.dju.labflow.run.run.application.*;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.repository.RunRepository;
 import com.dju.labflow.run.systemmetric.application.RunSystemMetricCommand;
 import com.dju.labflow.run.systemmetric.domain.GpuMetric;
+import com.dju.labflow.run.systemmetric.domain.RunSystemMetricId;
 import com.dju.labflow.run.systemmetric.domain.repository.RunSystemMetricRepository;
 import com.dju.labflow.run.text.application.RunTextCommand;
 import com.dju.labflow.user.domain.*;
@@ -41,8 +43,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.*;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.*;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -173,7 +177,7 @@ class ProjectHttpTests {
     void ownershipCannotBeSpoofedAndOtherUsersCannotManagePublicProjects() throws Exception {
         User owner = user();
         User other = user();
-        var result =
+        MvcResult result =
                 send(
                                 owner,
                                 HttpMethod.POST,
@@ -347,11 +351,11 @@ class ProjectHttpTests {
         User owner = user();
         ProjectId id = create(owner, ProjectVisibility.PUBLIC);
         Graph graph = graph(owner, id);
-        var deleted = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var started = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var deletion =
+        CountDownLatch deleted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch started = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> deletion =
                     executor.submit(
                             () ->
                                     new TransactionTemplate(transactions)
@@ -364,7 +368,7 @@ class ProjectHttpTests {
                                                     }));
             try {
                 assertThat(deleted.await(10, TimeUnit.SECONDS)).isTrue();
-                var append =
+                Future<List<RunMetricId>> append =
                         executor.submit(
                                 () -> {
                                     started.countDown();
@@ -391,11 +395,11 @@ class ProjectHttpTests {
     void keyIssuanceBeforeDeletionIsIncludedInDeletion() throws Exception {
         User owner = user();
         ProjectId id = create(owner, ProjectVisibility.PRIVATE);
-        var locked = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var deleting = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var issue =
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch deleting = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<IssueProjectApiKeyResult> issue =
                     executor.submit(
                             () ->
                                     new TransactionTemplate(transactions)
@@ -413,7 +417,7 @@ class ProjectHttpTests {
                                                     }));
             try {
                 assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
-                var deletion =
+                Future<?> deletion =
                         executor.submit(
                                 () -> {
                                     deleting.countDown();
@@ -421,7 +425,7 @@ class ProjectHttpTests {
                                 });
                 assertThat(deleting.await(10, TimeUnit.SECONDS)).isTrue();
                 release.countDown();
-                var issued = issue.get(10, TimeUnit.SECONDS);
+                IssueProjectApiKeyResult issued = issue.get(10, TimeUnit.SECONDS);
                 deletion.get(10, TimeUnit.SECONDS);
                 assertThat(keys.findByKeyHash(hasher.hash(issued.rawApiKey()))).isEmpty();
             } finally {
@@ -525,9 +529,10 @@ class ProjectHttpTests {
     }
 
     private Graph graph(User owner, ProjectId projectId) {
-        var issued =
+        IssueProjectApiKeyResult issued =
                 issuance.issue(owner.getId(), projectId, new IssueProjectApiKeyCommand("test"));
-        var principal = new ProjectApiKeyPrincipal(issued.apiKeyId(), projectId, owner.getId());
+        ProjectApiKeyPrincipal principal =
+                new ProjectApiKeyPrincipal(issued.apiKeyId(), projectId, owner.getId());
         RunId run =
                 runService.create(
                         principal, new RunCreateCommand("run", Map.of("framework", "pytorch")));
@@ -539,7 +544,7 @@ class ProjectHttpTests {
                 run,
                 new RunLogCommand("start", RunLogLevel.INFO, RunLogSource.USER, null));
         records.text(principal, run, new RunTextCommand("prediction", "cat", 1L, null));
-        var system =
+        RunSystemMetricId system =
                 records.systemMetric(
                         principal,
                         run,
@@ -583,7 +588,7 @@ class ProjectHttpTests {
     }
 
     private ProjectId create(User owner, ProjectVisibility visibility) throws Exception {
-        var response =
+        MockHttpServletResponse response =
                 send(
                                 owner,
                                 HttpMethod.POST,
@@ -603,7 +608,7 @@ class ProjectHttpTests {
     }
 
     private ProjectResponse detail(User owner, ProjectId id) throws Exception {
-        var response =
+        MockHttpServletResponse response =
                 send(owner, HttpMethod.GET, path(id), null)
                         .andExpect(status().isOk())
                         .andReturn()
@@ -614,7 +619,7 @@ class ProjectHttpTests {
     private ResultActions send(User owner, HttpMethod method, String path, String body)
             throws Exception {
         String csrf = UUID.randomUUID().toString();
-        var request =
+        MockHttpServletRequestBuilder request =
                 request(method, path)
                         .cookie(cookie(owner), new Cookie("XSRF-TOKEN", csrf))
                         .header("X-XSRF-TOKEN", csrf);

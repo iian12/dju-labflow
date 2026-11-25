@@ -3,6 +3,7 @@ package com.dju.labflow.run.metric.infrastructure.persistence;
 import com.dju.labflow.run.metric.domain.RunMetric;
 import com.dju.labflow.run.metric.domain.repository.RunMetricRepository;
 import com.dju.labflow.run.run.domain.RecordPageQuery;
+import com.dju.labflow.run.run.domain.RecordPosition;
 import com.dju.labflow.run.run.domain.RecordSlice;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.RunValidation;
@@ -45,8 +46,8 @@ public class RunMetricRepositoryImpl implements RunMetricRepository {
     public RecordSlice<RunMetric> findPage(RunId runId, RecordPageQuery query) {
         Objects.requireNonNull(runId, "Run ID must not be null");
         Objects.requireNonNull(query, "Page query must not be null");
-        var page = PageRequest.of(0, query.limit() + 1);
-        var position = query.position();
+        PageRequest page = PageRequest.of(0, query.limit() + 1);
+        RecordPosition position = query.position();
         List<RunMetricEntity> fetched;
         if (position == null) {
             fetched =

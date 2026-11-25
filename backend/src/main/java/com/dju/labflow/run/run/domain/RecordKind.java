@@ -18,7 +18,7 @@ public enum RecordKind {
     }
 
     public static RecordKind fromPath(String path) {
-        for (var kind : values()) if (kind.path.equals(path)) return kind;
+        for (RecordKind kind : values()) if (kind.path.equals(path)) return kind;
         throw new IllegalArgumentException("Unknown record kind");
     }
 }

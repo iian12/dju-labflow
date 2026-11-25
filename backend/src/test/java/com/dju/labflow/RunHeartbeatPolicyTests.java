@@ -22,7 +22,7 @@ class RunHeartbeatPolicyTests {
     void waitsForFirstHeartbeatAndDisconnectsAtTheExactBoundary() {
         assertThat(policy.status(run(NOW.minusSeconds(119))))
                 .isEqualTo(RunConnectionStatus.WAITING);
-        var expired = run(NOW.minusSeconds(120));
+        Run expired = run(NOW.minusSeconds(120));
         assertThat(policy.status(expired)).isEqualTo(RunConnectionStatus.DISCONNECTED);
         assertThat(expired.getStatus()).isEqualTo(RunStatus.RUNNING);
         assertThat(expired.getEndedAt()).isNull();
@@ -31,7 +31,7 @@ class RunHeartbeatPolicyTests {
 
     @Test
     void usesLastHeartbeatAndAutomaticallyRecoversWithoutEndingRun() {
-        var run = run(NOW.minusSeconds(500));
+        Run run = run(NOW.minusSeconds(500));
         run.heartbeat(NOW.minusSeconds(121));
         assertThat(policy.status(run)).isEqualTo(RunConnectionStatus.DISCONNECTED);
         run.heartbeat(NOW.minusSeconds(119));
@@ -41,7 +41,7 @@ class RunHeartbeatPolicyTests {
 
     @Test
     void evenLongDisconnectionNeverChangesRunState() {
-        var run = run(NOW.minus(Duration.ofDays(30)));
+        Run run = run(NOW.minus(Duration.ofDays(30)));
         assertThat(policy.status(run)).isEqualTo(RunConnectionStatus.DISCONNECTED);
         assertThat(policy.status(run)).isEqualTo(RunConnectionStatus.DISCONNECTED);
         assertThat(run.getStatus()).isEqualTo(RunStatus.RUNNING);
@@ -49,17 +49,17 @@ class RunHeartbeatPolicyTests {
 
     @Test
     void terminalRunsAreInactiveRegardlessOfOldHeartbeat() {
-        var completed = run(NOW.minusSeconds(500));
+        Run completed = run(NOW.minusSeconds(500));
         completed.complete(NOW.minusSeconds(200));
         assertThat(policy.status(completed)).isEqualTo(RunConnectionStatus.INACTIVE);
-        var failed = run(NOW.minusSeconds(500));
+        Run failed = run(NOW.minusSeconds(500));
         failed.fail("training error", NOW.minusSeconds(200));
         assertThat(policy.status(failed)).isEqualTo(RunConnectionStatus.INACTIVE);
     }
 
     @Test
     void timeoutIsConfigurableAndMustBePositive() {
-        var custom = new RunHeartbeatPolicy(clock, Duration.ofMinutes(5));
+        RunHeartbeatPolicy custom = new RunHeartbeatPolicy(clock, Duration.ofMinutes(5));
         assertThat(custom.status(run(NOW.minusSeconds(120))))
                 .isEqualTo(RunConnectionStatus.WAITING);
         assertThatThrownBy(() -> new RunHeartbeatPolicy(clock, Duration.ZERO))

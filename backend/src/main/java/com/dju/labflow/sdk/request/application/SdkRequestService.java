@@ -2,6 +2,7 @@ package com.dju.labflow.sdk.request.application;
 
 import com.dju.labflow.global.id.IdGenerator;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
+import com.dju.labflow.project.project.domain.Project;
 import com.dju.labflow.project.project.domain.repository.ProjectRepository;
 import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.run.run.application.RunAccessPolicy;
@@ -55,7 +56,7 @@ public class SdkRequestService {
         if (requestId == null) return write.get();
         if (!requestId.matches("[A-Za-z0-9_-]{1,64}"))
             throw new IllegalArgumentException("Invalid requestId");
-        var project =
+        Project project =
                 projects.findByIdForUpdate(principal.projectId())
                         .orElseThrow(ProjectNotFoundException::new);
         if (!project.getCreatedBy().equals(principal.createdBy()))
@@ -64,7 +65,7 @@ public class SdkRequestService {
         if (runId != null) access.requireOwnedForUpdate(principal, runId);
         String requestKey = hash(requestId);
         String fingerprint = fingerprint(operation, runId, payload);
-        var previous = requests.find(principal.projectId(), requestKey);
+        Optional<SdkRequest> previous = requests.find(principal.projectId(), requestKey);
         if (previous.isPresent()) {
             if (!previous.get().fingerprint().equals(fingerprint))
                 throw new RequestIdConflictException();
@@ -104,7 +105,7 @@ public class SdkRequestService {
 
     private Object ordered(Object value) {
         if (value instanceof Map<?, ?> map) {
-            var sorted = new TreeMap<String, Object>();
+            TreeMap<String, Object> sorted = new TreeMap<>();
             map.forEach((key, item) -> sorted.put((String) key, ordered(item)));
             return sorted;
         }

@@ -1,7 +1,9 @@
 package com.dju.labflow.global.validation;
 
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /** 컨트롤러를 거치지 않는 서비스 호출에도 Bean Validation 규칙을 적용한다. */
@@ -15,7 +17,7 @@ public class RequestValidator {
 
     public void validate(Object request) {
         InputValidation.required(request, "Request");
-        var violations = validator.validate(request);
+        Set<ConstraintViolation<Object>> violations = validator.validate(request);
         if (!violations.isEmpty()) throw new ConstraintViolationException(violations);
     }
 }

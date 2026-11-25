@@ -60,7 +60,7 @@ class PythonModelIntegrationTests {
                         status -> {
                             for (Project project :
                                     projects.findByCreatedBy(ownerId, 0, 100).items()) {
-                                var locked =
+                                Project locked =
                                         projects.findByIdForUpdate(project.getId()).orElseThrow();
                                 contents.deleteByProjectId(project.getId());
                                 projects.delete(locked);
@@ -99,7 +99,7 @@ class PythonModelIntegrationTests {
         assertThat(completedOutput).contains("epoch=20/20", "COMPLETED", "test_accuracy=");
         String failedOutput = executeModel(key, "digits-model-failed", true);
         assertThat(failedOutput).contains("Intentional training failure after epoch 1");
-        var saved = runs.findByProjectId(projectId, 100);
+        List<Run> saved = runs.findByProjectId(projectId, 100);
         assertThat(saved).hasSize(2);
         Run completed =
                 saved.stream()

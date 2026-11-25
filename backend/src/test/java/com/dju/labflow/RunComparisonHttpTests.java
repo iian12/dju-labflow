@@ -25,6 +25,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -58,8 +59,9 @@ class RunComparisonHttpTests {
                 .executeWithoutResult(
                         status -> {
                             for (UserId id : owners) {
-                                for (var project : projects.findByCreatedBy(id, 0, 100).items()) {
-                                    var locked =
+                                for (Project project :
+                                        projects.findByCreatedBy(id, 0, 100).items()) {
+                                    Project locked =
                                             projects.findByIdForUpdate(project.getId())
                                                     .orElseThrow();
                                     contents.deleteByProjectId(project.getId());
@@ -75,8 +77,8 @@ class RunComparisonHttpTests {
     @Test
     void comparesActualMetricsInSelectionOrderAndSwitchesBaselineAndParameterFilter()
             throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
-        var second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
         records.parameters(
                 f.principal(),
                 f.run(),
@@ -92,7 +94,7 @@ class RunComparisonHttpTests {
         metric(f, f.run(), "val_loss", 10L, 0.2, 1);
         runs.complete(f.principal(), f.run());
         runs.fail(f.principal(), second, new RunFailCommand("failed"));
-        var result = compare(f, List.of(second, f.run()), "val_accuracy", "");
+        JsonNode result = compare(f, List.of(second, f.run()), "val_accuracy", "");
         assertThat(result.get("baselineRunId").longValue()).isEqualTo(second.value());
         assertThat(result.get("commonStep").longValue()).isEqualTo(5);
         assertThat(result.at("/runs/0/runId").longValue()).isEqualTo(second.value());
@@ -109,7 +111,7 @@ class RunComparisonHttpTests {
         assertThat(result.at("/parameters/1/different").asBoolean()).isFalse();
         assertThat(result.at("/parameters/2/values/0").isNull()).isTrue();
         assertThat(result.at("/parameters/2/values/1").asString()).isEmpty();
-        var switched =
+        JsonNode switched =
                 compare(
                         f,
                         List.of(second, f.run()),
@@ -123,8 +125,8 @@ class RunComparisonHttpTests {
 
     @Test
     void usesLargestActuallySharedStepAndNewestDuplicateByTimeThenId() throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
-        var second = runs.create(f.principal(), new RunCreateCommand("sparse", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("sparse", Map.of()));
         metric(f, f.run(), "loss", 5L, 0.8, 0);
         metric(f, f.run(), "loss", 20L, 0.3, 0);
         metric(f, second, "loss", 5L, 0.9, 0);
@@ -132,7 +134,7 @@ class RunComparisonHttpTests {
         metric(f, f.run(), "loss", 5L, 0.7, 2);
         metric(f, f.run(), "loss", 5L, 0.6, 2);
         metric(f, f.run(), "loss", 5L, 0.95, 1);
-        var result = compare(f, List.of(f.run(), second), "loss", "");
+        JsonNode result = compare(f, List.of(f.run(), second), "loss", "");
         assertThat(result.get("commonStep").longValue()).isEqualTo(5);
         assertThat(result.at("/runs/0/commonStepMetric/value").doubleValue()).isEqualTo(0.6);
         assertThat(result.at("/runs/0/latestMetric/value").doubleValue()).isEqualTo(0.6);
@@ -144,14 +146,14 @@ class RunComparisonHttpTests {
 
     @Test
     void requiresSharedStepAcrossAllFourRunsRatherThanOnlyTheBaseline() throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
         List<RunId> selected = new ArrayList<>(List.of(f.run()));
         for (int i = 0; i < 3; i++)
             selected.add(runs.create(f.principal(), new RunCreateCommand("run-" + i, Map.of())));
         for (RunId run : selected) metric(f, run, "loss", 0L, 1.0, 0);
         for (int i = 0; i < 3; i++) metric(f, selected.get(i), "loss", 10L, 0.5, 1);
         metric(f, selected.getLast(), "loss", 20L, 0.4, 1);
-        var result = compare(f, selected, "loss", "");
+        JsonNode result = compare(f, selected, "loss", "");
         assertThat(result.get("runs").size()).isEqualTo(4);
         assertThat(result.get("commonStep").longValue()).isZero();
     }
@@ -159,11 +161,11 @@ class RunComparisonHttpTests {
     @Test
     void missingMetricsAndUnalignedOrMissingStepsReturnNullWithoutInventingValues()
             throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
-        var second = runs.create(f.principal(), new RunCreateCommand("empty", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("empty", Map.of()));
         metric(f, f.run(), "loss", 3L, 0.8, 0);
         metric(f, second, "loss", 7L, 0.2, 0);
-        var result = compare(f, List.of(f.run(), second), "loss", "");
+        JsonNode result = compare(f, List.of(f.run(), second), "loss", "");
         assertThat(result.get("commonStep").isNull()).isTrue();
         assertThat(result.at("/runs/0/deltaFromBaseline").isNull()).isTrue();
         assertThat(result.at("/runs/1/commonStepMetric").isNull()).isTrue();
@@ -181,8 +183,8 @@ class RunComparisonHttpTests {
 
     @Test
     void samplesEntireHistoryWithinLimitAndKeepsSummaryIndependentOfChart() throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
-        var second = runs.create(f.principal(), new RunCreateCommand("short", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("short", Map.of()));
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status -> {
@@ -198,8 +200,8 @@ class RunComparisonHttpTests {
                                                 .build());
                         });
         metric(f, second, "loss", 799L, 10.0, 0);
-        var result = compare(f, List.of(f.run(), second), "loss", "&maxPoints=5");
-        var series = result.at("/runs/0/series");
+        JsonNode result = compare(f, List.of(f.run(), second), "loss", "&maxPoints=5");
+        JsonNode series = result.at("/runs/0/series");
         assertThat(series.get("sampled").asBoolean()).isTrue();
         assertThat(series.get("totalPoints").longValue()).isEqualTo(1501);
         assertThat(series.get("points").size()).isEqualTo(5);
@@ -209,7 +211,7 @@ class RunComparisonHttpTests {
         assertThat(result.at("/runs/0/commonStepMetric/value").doubleValue()).isEqualTo(799);
         assertThat(result.at("/runs/0/latestMetric/value").doubleValue()).isEqualTo(1500);
         assertThat(result.at("/runs/1/deltaFromBaseline").doubleValue()).isEqualTo(-789);
-        var tiny = compare(f, List.of(f.run(), second), "loss", "&maxPoints=2");
+        JsonNode tiny = compare(f, List.of(f.run(), second), "loss", "&maxPoints=2");
         assertThat(tiny.at("/runs/0/series/points").size()).isEqualTo(2);
         assertThat(tiny.at("/runs/0/series/points/1/step").longValue()).isEqualTo(1500);
     }
@@ -217,16 +219,17 @@ class RunComparisonHttpTests {
     @Test
     void privateComparisonRequiresOwnerWhilePublicComparisonAllowsAnonymousReaders()
             throws Exception {
-        var f = fixture(ProjectVisibility.PRIVATE);
-        var second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PRIVATE);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
         String path = path(f, List.of(f.run(), second), "loss");
         mvc.perform(get(path)).andExpect(status().isUnauthorized());
         mvc.perform(get(path).cookie(cookie(user()))).andExpect(status().isForbidden());
         mvc.perform(get(path).header("Authorization", "Bearer " + f.key()))
                 .andExpect(status().isUnauthorized());
         mvc.perform(get(path).cookie(cookie(f.owner()))).andExpect(status().isOk());
-        var other = fixture(ProjectVisibility.PUBLIC);
-        var otherSecond = runs.create(other.principal(), new RunCreateCommand("public", Map.of()));
+        Fixture other = fixture(ProjectVisibility.PUBLIC);
+        RunId otherSecond =
+                runs.create(other.principal(), new RunCreateCommand("public", Map.of()));
         mvc.perform(get(path(other, List.of(other.run(), otherSecond), "loss")))
                 .andExpect(status().isOk());
         mvc.perform(get(path(other, List.of(other.run(), f.run()), "loss")))
@@ -238,8 +241,8 @@ class RunComparisonHttpTests {
 
     @Test
     void rejectsInvalidSelectionBaselineAndLimitsAndDocumentsEndpoint() throws Exception {
-        var f = fixture(ProjectVisibility.PUBLIC);
-        var second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        RunId second = runs.create(f.principal(), new RunCreateCommand("second", Map.of()));
         String base = "/api/v1/projects/" + f.project().value() + "/runs/compare";
         String a = f.run().value().toString();
         String b = second.value().toString();
@@ -277,7 +280,7 @@ class RunComparisonHttpTests {
 
     private JsonNode compare(Fixture f, List<RunId> selected, String key, String suffix)
             throws Exception {
-        var response =
+        MockHttpServletResponse response =
                 mvc.perform(get(path(f, selected, key) + suffix))
                         .andExpect(status().isOk())
                         .andReturn()
@@ -295,7 +298,7 @@ class RunComparisonHttpTests {
     }
 
     private User user() {
-        var id = UserId.of(ids.nextId());
+        UserId id = UserId.of(ids.nextId());
         owners.add(id);
         return users.save(
                 User.restore(
@@ -308,8 +311,8 @@ class RunComparisonHttpTests {
     }
 
     private Fixture fixture(ProjectVisibility visibility) {
-        var owner = user();
-        var projectId = ProjectId.of(ids.nextId());
+        User owner = user();
+        ProjectId projectId = ProjectId.of(ids.nextId());
         projects.save(
                 Project.create(
                         projectId,
@@ -318,11 +321,12 @@ class RunComparisonHttpTests {
                         owner.getId(),
                         visibility,
                         Instant.now()));
-        var issued =
+        IssueProjectApiKeyResult issued =
                 issuance.issue(
                         owner.getId(), projectId, new IssueProjectApiKeyCommand("compare-test"));
-        var principal = new ProjectApiKeyPrincipal(issued.apiKeyId(), projectId, owner.getId());
-        var run = runs.create(principal, new RunCreateCommand("first", Map.of()));
+        ProjectApiKeyPrincipal principal =
+                new ProjectApiKeyPrincipal(issued.apiKeyId(), projectId, owner.getId());
+        RunId run = runs.create(principal, new RunCreateCommand("first", Map.of()));
         return new Fixture(owner, projectId, run, principal, issued.rawApiKey());
     }
 

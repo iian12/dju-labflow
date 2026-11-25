@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.security.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+import java.net.URI;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -58,7 +59,7 @@ public class ProjectController {
             @Parameter(hidden = true) @CurrentUserId UserId userId,
             @Valid @RequestBody ProjectCreateRequest request) {
         ProjectId id = projectService.create(userId, request.toCommand());
-        var location =
+        URI location =
                 ServletUriComponentsBuilder.fromCurrentRequestUri()
                         .path("/{projectId}")
                         .buildAndExpand(id.value())

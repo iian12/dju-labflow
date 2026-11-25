@@ -2,6 +2,7 @@ package com.dju.labflow.global.config;
 
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
@@ -68,7 +69,7 @@ public class OpenApiConfig {
     @Bean
     public OpenApiCustomizer refreshSecurityCustomizer() {
         return openApi -> {
-            var path = openApi.getPaths().get("/api/v1/auth/refresh");
+            PathItem path = openApi.getPaths().get("/api/v1/auth/refresh");
             if (path != null && path.getPost() != null) {
                 path.getPost()
                         .setSecurity(

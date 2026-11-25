@@ -48,7 +48,7 @@ public class RunSummaryController {
             @PathVariable @Positive Long runId,
             @RequestParam @NotBlank @Size(max = 100) String metricKey,
             @RequestParam(defaultValue = "500") @Min(2) @Max(1000) int maxPoints) {
-        var result =
+        RunSummaryService.MetricCurve result =
                 service.curve(
                         user,
                         ProjectId.of(projectId),

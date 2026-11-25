@@ -107,16 +107,16 @@ class RunDomainTests {
 
     @Test
     void metadataAndGpuListsAreDefensiveImmutableCopies() {
-        var metadata = new HashMap<>(Map.of("framework", "pytorch"));
+        HashMap<String, String> metadata = new HashMap<>(Map.of("framework", "pytorch"));
         Run run = run(metadata);
         metadata.put("framework", "changed");
         assertThat(run.getMetadata()).containsEntry("framework", "pytorch");
         assertThatThrownBy(() -> run.getMetadata().put("a", "b"))
                 .isInstanceOf(UnsupportedOperationException.class);
-        var gpus =
+        ArrayList<GpuMetric> gpus =
                 new ArrayList<>(
                         List.of(new GpuMetric(1, 10.0, 1L, 10L), new GpuMetric(0, 20.0, 2L, 10L)));
-        var snapshot =
+        RunSystemMetric snapshot =
                 RunSystemMetric.create(
                         RunSystemMetricId.of(1L), RUN_ID, 10.0, 1L, 10L, gpus, 0.0, NOW);
         gpus.clear();

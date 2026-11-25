@@ -12,6 +12,7 @@ import com.dju.labflow.run.log.domain.*;
 import com.dju.labflow.run.metric.application.RunMetricCommand;
 import com.dju.labflow.run.parameter.application.RunParameterCommand;
 import com.dju.labflow.run.run.application.*;
+import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.user.domain.*;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -54,8 +55,9 @@ class StudioBrowserIntegrationTests {
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status -> {
-                            for (var project : projects.findByCreatedBy(owner, 0, 100).items()) {
-                                var locked =
+                            for (Project project :
+                                    projects.findByCreatedBy(owner, 0, 100).items()) {
+                                Project locked =
                                         projects.findByIdForUpdate(project.getId()).orElseThrow();
                                 contents.deleteByProjectId(project.getId());
                                 projects.delete(locked);
@@ -81,7 +83,7 @@ class StudioBrowserIntegrationTests {
                         "실제 연구자",
                         Role.USER,
                         AccountStatus.ACTIVE));
-        var project = ProjectId.of(ids.nextId());
+        ProjectId project = ProjectId.of(ids.nextId());
         projects.save(
                 Project.create(
                         project,
@@ -90,10 +92,12 @@ class StudioBrowserIntegrationTests {
                         owner,
                         ProjectVisibility.PRIVATE,
                         Instant.now()));
-        var issued = keys.issue(owner, project, new IssueProjectApiKeyCommand("seed"));
-        var principal = new ProjectApiKeyPrincipal(issued.apiKeyId(), project, owner);
+        IssueProjectApiKeyResult issued =
+                keys.issue(owner, project, new IssueProjectApiKeyCommand("seed"));
+        ProjectApiKeyPrincipal principal =
+                new ProjectApiKeyPrincipal(issued.apiKeyId(), project, owner);
         for (int index = 0; index < 2; index++) {
-            var run =
+            RunId run =
                     runs.create(
                             principal,
                             new RunCreateCommand(
@@ -121,7 +125,7 @@ class StudioBrowserIntegrationTests {
         }
         Path frontend = Path.of("..", "frontend").toAbsolutePath().normalize();
         Path output = Path.of("build", "studio-browser.log").toAbsolutePath();
-        var builder =
+        ProcessBuilder builder =
                 new ProcessBuilder(System.getenv("LABFLOW_STUDIO_NODE"), "tests/studio.backend.ts");
         builder.directory(frontend.toFile());
         builder.environment().put("LABFLOW_BACKEND_URL", "http://127.0.0.1:" + port);

@@ -2,6 +2,7 @@ package com.dju.labflow.run.run.presentation;
 
 import com.dju.labflow.run.metric.domain.RunMetric;
 import com.dju.labflow.run.run.application.RunComparison;
+import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -60,8 +61,8 @@ public record RunComparisonResponse(
                 comparison.runs().stream()
                         .map(
                                 item -> {
-                                    var run = item.run();
-                                    var points = item.series().points();
+                                    Run run = item.run();
+                                    List<RunMetric> points = item.series().points();
                                     return new ComparedRun(
                                             run.getId().value(),
                                             run.getName(),

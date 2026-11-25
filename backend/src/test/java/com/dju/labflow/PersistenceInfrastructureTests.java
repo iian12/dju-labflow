@@ -12,6 +12,7 @@ import com.dju.labflow.project.project.infrastructure.persistence.ProjectEntity;
 import com.dju.labflow.user.domain.*;
 import com.dju.labflow.user.infrastructure.persistence.UserEntity;
 import jakarta.persistence.EntityManager;
+import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -88,7 +89,7 @@ class PersistenceInfrastructureTests {
         em.unwrap(Session.class)
                 .doWork(
                         connection -> {
-                            try (var indexes =
+                            try (ResultSet indexes =
                                     connection
                                             .getMetaData()
                                             .getIndexInfo(
@@ -103,7 +104,7 @@ class PersistenceInfrastructureTests {
                                         uniqueColumns.add(indexes.getString("COLUMN_NAME"));
                                 }
                             }
-                            try (var columns =
+                            try (ResultSet columns =
                                     connection
                                             .getMetaData()
                                             .getColumns(

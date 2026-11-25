@@ -5,6 +5,7 @@ import com.dju.labflow.run.run.domain.RunConnectionStatus;
 import com.dju.labflow.run.run.domain.RunStatus;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -24,8 +25,8 @@ public class RunHeartbeatPolicy {
 
     public RunConnectionStatus status(Run run) {
         if (run.getStatus() != RunStatus.RUNNING) return RunConnectionStatus.INACTIVE;
-        var heartbeat = run.getLastHeartbeatAt();
-        var lastSeen = heartbeat == null ? run.getStartedAt() : heartbeat;
+        Instant heartbeat = run.getLastHeartbeatAt();
+        Instant lastSeen = heartbeat == null ? run.getStartedAt() : heartbeat;
         if (!lastSeen.isAfter(clock.instant().minus(timeout)))
             return RunConnectionStatus.DISCONNECTED;
         return heartbeat == null ? RunConnectionStatus.WAITING : RunConnectionStatus.CONNECTED;

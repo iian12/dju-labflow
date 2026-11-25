@@ -27,7 +27,7 @@ public class ApiTestController {
     @GetMapping("/api/v1/admin/api-test")
     @Operation(summary = "관리자 API 테스트 접근 확인 및 API 목록")
     public ResponseEntity<List<ApiOperation>> catalog() {
-        var operations =
+        List<ApiOperation> operations =
                 mappings.getHandlerMethods().entrySet().stream()
                         .filter(
                                 entry ->

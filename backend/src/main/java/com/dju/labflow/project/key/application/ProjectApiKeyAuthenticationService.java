@@ -6,6 +6,7 @@ import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
 import com.dju.labflow.project.key.exception.InvalidProjectApiKeyException;
 import com.dju.labflow.project.key.util.ProjectApiKeyHasher;
+import com.dju.labflow.user.domain.User;
 import com.dju.labflow.user.domain.repository.UserRepository;
 import java.time.Clock;
 import org.springframework.security.core.AuthenticationException;
@@ -45,7 +46,7 @@ public class ProjectApiKeyAuthenticationService {
         try {
             apiKey.validateUsable();
             // JWT뿐 아니라 기존 SDK 키도 소유자가 차단되면 사용할 수 없다.
-            var owner =
+            User owner =
                     userRepository
                             .findById(apiKey.getCreatedBy())
                             .orElseThrow(
