@@ -1,3 +1,5 @@
+import { publishSessionChange, sessionStamp, withSessionLock } from './sessionCoordinator.ts';
+
 export class ApiError extends Error {
   status: number; code: string;
   constructor(message: string, status = 0, code = '') { super(message); this.status = status; this.code = code; }
@@ -26,6 +28,7 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   const authExempt = ['/api/v1/auth/login', '/api/v1/auth/sign-up'].includes(path);
   if (!['GET', 'HEAD'].includes(method) && !authExempt) await ensureCsrf();
   const epoch = generation;
+  const session = sessionStamp();
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (csrf() && method !== 'GET') headers['X-XSRF-TOKEN'] = csrf();
@@ -41,14 +44,30 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   if (response.status === 401 && options.retryAuth !== false && !authExempt && path !== '/api/v1/auth/refresh') {
     try {
       if (epoch === generation) {
-        if (!refreshFlight) refreshFlight = api<void>('/api/v1/auth/refresh', { method: 'POST', retryAuth: false })
-          .then(() => { generation++; }).finally(() => { refreshFlight = null; });
+        if (!refreshFlight) refreshFlight = withSessionLock(async () => {
+          if (sessionStamp() !== session) throw new ApiError('다른 탭에서 로그인 상태가 변경되었습니다. 다시 시도해 주세요.', 401, 'SESSION_CHANGED');
+          // Another tab may already have rotated the shared HttpOnly cookie while we waited.
+          try { await api('/api/v1/auth/me', { retryAuth: false }); return; }
+          catch (issue) { if (!(issue instanceof ApiError) || issue.status !== 401) throw issue; }
+          try { await api<void>('/api/v1/auth/refresh', { method: 'POST', retryAuth: false }); }
+          catch (issue) {
+            if (!(issue instanceof ApiError) || issue.status !== 401) throw issue;
+            // A storage-disabled tab may have refreshed concurrently; check the shared cookie.
+            for (const delay of [0, 150, 500]) {
+              if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+              try { await api('/api/v1/auth/me', { retryAuth: false }); return; }
+              catch (probe) { if (!(probe instanceof ApiError) || probe.status !== 401) throw probe; }
+            }
+            publishSessionChange('expired');
+            throw issue;
+          }
+        }).then(() => { generation++; }).finally(() => { refreshFlight = null; });
         await refreshFlight;
       }
+      if (sessionStamp() !== session) throw new ApiError('로그인 상태가 변경되었습니다. 다시 시도해 주세요.', 401, 'SESSION_CHANGED');
       options.signal?.throwIfAborted();
       return api<T>(path, { ...options, retryAuth: false });
     } catch (issue) {
-      if (issue instanceof ApiError && issue.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new Event('labflow-session-expired'));
       throw issue;
     }
   }
@@ -72,7 +91,10 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
 }
 export async function logout() {
   if (refreshFlight) await refreshFlight.catch(() => {});
-  await api('/api/v1/auth/logout', { method: 'POST', retryAuth: false }); generation++;
+  await withSessionLock(async () => {
+    await api('/api/v1/auth/logout', { method: 'POST', retryAuth: false });
+    generation++; publishSessionChange('logout');
+  });
 }
 export type Page<T> = { items: T[]; page: number; size: number; totalPages: number; totalElements: number };
 export async function allPages<T>(path: string, signal?: AbortSignal): Promise<Page<T>> {

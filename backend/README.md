@@ -158,7 +158,7 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 
 Run 목록은 `page`(0부터), `size`(1~100), `search`(이름의 부분 문자열, 최대 100자), `status`(쉼표로 구분한 상태), `sort`(`recent`, `high`, `low`, `duration`), `metricKey`, `runIds`(서로 다른 ID 최대 100개)를 지원합니다. 검색·필터 후 DB에서 정렬하고 한 페이지만 반환합니다. 지표 정렬은 `metricKey`가 필수이며 시각/ID 기준 최신 값을 사용하고 미기록 Run은 뒤에 둡니다. `duration`은 진행 중이면 서버 현재 시각까지의 시간을 사용합니다. 동률은 시작 시각/ID 내림차순입니다. `totalElements`는 검색 결과 수, `projectTotal`과 `counts`는 프로젝트 전체 집계, `availableMetrics`는 프로젝트 전체 지표 이름입니다. Studio는 페이지당 20개 및 그 요약만 조회하며 페이지 간 비교 선택을 유지합니다. 개요의 확인할 실험은 별도 상태 필터로 최대 3개를 조회합니다. 기존 MariaDB에는 `database/run-list-metric-index.sql`을 한 번 적용합니다. 새 DB는 `database/runs.sql`에 인덱스가 포함되어 있습니다.
 
-종료된 실험과 비교는 폴링을 중지하며 상세·설정 화면은 Run 목록/요약을 주기적으로 읽지 않습니다.
+프런트는 같은 출처의 탭 간 Web Locks(미지원 시 IndexedDB 임대)로 refresh·로그인·로그아웃을 직렬화합니다. 잠금을 얻은 뒤 `/auth/me`로 다른 탭의 갱신 여부를 확인하고 불필요한 회전을 생략합니다. BroadcastChannel/storage 이벤트로 세션 변경을 전달하고 이전 사용자의 화면과 진행 요청을 정리합니다. 종료된 실험과 비교는 폴링을 중지하며 상세·설정 화면은 Run 목록/요약을 주기적으로 읽지 않습니다.
 
 `frontend`는 세션, 프로젝트 CRUD, Run 목록·개요·비교·상세, 기록 커서 탐색, API 키 발급·목록·폐기와 기록 내보내기를 실제 API로 처리합니다. 빈 데이터나 서버 오류를 샘플 데이터로 대체하지 않습니다. 최신 프런트에는 여기 추가한 API가 필요하므로 백엔드를 다시 빌드/실행합니다.
 

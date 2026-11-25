@@ -21,6 +21,14 @@ export default function StudioApp() {
   const auth = ['login','signup','verify'].includes(mode), standalone = mode === 'records', workbench = mode === 'api-test';
   useEffect(() => { const change = () => { setHash(readRoute()); setForm(null); setError(undefined); window.scrollTo(0,0); }; addEventListener('hashchange',change); return () => removeEventListener('hashchange',change); }, []);
   useEffect(() => { const expire = () => setExpired(true); addEventListener('labflow-session-expired',expire); return () => removeEventListener('labflow-session-expired',expire); }, []);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const kind = (event as CustomEvent<{ kind: string }>).detail.kind;
+      setExpired(kind !== 'login'); setEpoch(value => value + 1); setForm(null); setError(undefined);
+    };
+    addEventListener('labflow-auth-state', changed);
+    return () => removeEventListener('labflow-auth-state', changed);
+  }, []);
   useEffect(() => { if (!auth && !standalone) document.title = 'LabFlow Studio'; }, [auth,standalone,hash]);
   const session = useApi<Session>(!auth && !standalone ? '/api/v1/auth/me' : null, String(epoch));
   const user = !expired && !(session.error instanceof ApiError && session.error.status === 401) ? session.data : undefined;
@@ -32,7 +40,7 @@ export default function StudioApp() {
   const selected = project.data ? {id:project.data.projectId,name:project.data.name} : undefined;
   const create = () => { if (user) setForm('create'); else location.hash='/login'; };
   if (auth) return <AuthPage mode={mode as AuthMode} email={email} setEmail={setEmail} onLogin={() => {setExpired(false);setEpoch(value=>value+1);location.hash='/projects';}}/>;
-  if (standalone) return <RunRecordsBrowser projectId={parts[1]??''} runId={parts[2]??''} tab={parts[3]??'metrics'}/>;
+  if (standalone) return <RunRecordsBrowser key={`${epoch}:${expired}`} projectId={parts[1]??''} runId={parts[2]??''} tab={parts[3]??'metrics'}/>;
   return <div className="app live-app"><aside><a className="brand" href="#/projects"><span className="brand-mark">∿</span>LabFlow<span className="studio">Studio</span></a><div className="workspace"><div className="avatar">{user?.name.slice(0,2).toUpperCase() ?? 'LF'}</div><div><strong>{user?.name ?? '공개 워크스페이스'}</strong><small>{user ? '개인 워크스페이스' : '공유 프로젝트 조회'}</small></div></div><ProjectNavigation projects={links} project={selected} onCreate={create}/></aside>
     <div className="body"><header><div className="breadcrumb"><a href="#/projects">프로젝트</a>{project.data && <><span>/</span><a href={`#/projects/${id}/runs`}>{project.data.name}</a></>}</div><div className="account-actions"><a href="#/records">실험 기록</a>{user?.role === 'ADMIN' && <a href="#/api-test" aria-current={workbench ? 'page' : undefined}>API 테스트</a>}{user ? <button disabled={busy} onClick={async () => { if(busy)return;setBusy(true);setError(undefined);try{await logout();setExpired(true);setEpoch(value=>value+1);setForm(null);location.hash='/login';}catch(issue){setError(issue);}finally{setBusy(false);} }}>{busy?'로그아웃 중…':'로그아웃'}</button> : <><a href="#/login">로그인</a><a className="account-signup" href="#/signup">회원가입</a></>}<ThemeToggle/></div></header><main>
       <ErrorBox error={error}/>{workbench && <><ErrorBox error={session.error} retry={session.refresh}/>{session.loading ? <p role="status" className="live-empty">관리자 권한을 확인하는 중…</p> : user?.role === 'ADMIN' ? <Suspense fallback={<p role="status" className="live-empty">API 테스트를 불러오는 중…</p>}><AdminApiPage key={scope} selectedId={parts[1]} scope={scope} sessionChanged={session.refresh}/></Suspense> : <Empty title="ADMIN 전용 페이지입니다"><p>관리자 계정으로 로그인해 주세요.</p><a href="#/login">로그인 →</a></Empty>}</>}{!id && !workbench && <><div className="page-heading"><div><div className="eyebrow">Workspace</div><h1>프로젝트</h1><p>실험을 정리하고, 다음 학습의 근거를 찾으세요</p></div><button className="primary" onClick={create}>+ 새 프로젝트</button></div>

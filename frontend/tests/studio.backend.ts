@@ -63,10 +63,21 @@ try {
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   await page.screenshot({path:results+'/studio-real-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:900});
-  // An expired/missing access cookie is refreshed with the real HttpOnly refresh cookie.
+  // Two tabs share the real rotating HttpOnly refresh cookie and must refresh it only once.
+  const secondTab = await context.newPage();
+  let refreshes = 0;
+  await context.route('**/api/v1/auth/refresh', async route => {
+    refreshes++;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await route.continue();
+  });
   await context.clearCookies({name:'access_token'});
-  await page.goto(`${base}/#/projects`);
-  await page.getByRole('heading',{name:'Actual experiments',exact:true}).waitFor();
+  await Promise.all([page, secondTab].map(tab => tab.goto(`${base}/#/projects`)));
+  await Promise.all([page, secondTab].map(tab => tab.getByRole('heading',{name:'Actual experiments',exact:true}).waitFor()));
+  assert.equal(refreshes, 1);
+  assert.equal(await secondTab.getByRole('button', { name: '로그아웃', exact: true }).count(), 1);
+  await secondTab.close();
+  await context.unroute('**/api/v1/auth/refresh');
   await page.getByRole('button',{name:'+ 새 프로젝트',exact:true}).click();
   const modal=page.getByRole('dialog',{name:'새 프로젝트',exact:true});
   await modal.getByLabel('프로젝트 이름',{exact:true}).fill('Created through UI');
