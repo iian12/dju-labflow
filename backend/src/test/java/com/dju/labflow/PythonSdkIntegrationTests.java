@@ -186,7 +186,15 @@ class PythonSdkIntegrationTests {
                 .contains(
                         tuple("자동 stdout 🐈\n", RunLogLevel.INFO, RunLogSource.STDOUT),
                         tuple("자동 stderr\n", RunLogLevel.ERROR, RunLogSource.STDERR),
-                        tuple("partial output", RunLogLevel.INFO, RunLogSource.STDOUT));
+                        tuple("partial output", RunLogLevel.INFO, RunLogSource.STDOUT),
+                        tuple("recovered after completion", RunLogLevel.INFO, RunLogSource.STDOUT));
+        assertThat(
+                        logs.findByRunId(telemetry.getId(), 100).stream()
+                                .filter(
+                                        log ->
+                                                log.getMessage()
+                                                        .equals("recovered after completion")))
+                .hasSize(1);
         assertThat(systemMetrics.findByRunId(telemetry.getId(), 100))
                 .hasSizeGreaterThanOrEqualTo(2)
                 .allSatisfy(

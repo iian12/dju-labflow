@@ -350,13 +350,15 @@ SDK는 실행 중인 Run의 `POST /api/v1/sdk/runs/{runId}/artifacts?name=...&ki
 
 동일 요청 ID가 아직 UPLOADING이면 409를 반환합니다. 일반 전송 실패는 파일과 예약을 제거하여 같은 ID로 재시도할 수 있습니다. 전송 중 프로젝트 삭제 또는 Run 종료가 먼저 확정되면 업로드 완료를 거부하고 파일·예약을 정리합니다. 비정상 종료로 남은 예약은 다음 업로드 예약 시 24시간 기한을 기준으로 정리합니다. 프로젝트 삭제 커밋 후에는 완료 파일과 임시 파일을 모두 삭제 시도합니다. DB 스키마 추가는 없습니다. 파일 삭제 자체가 실패하면 로그가 남으며 실제 MariaDB 잠금 및 파일시스템 장애는 별도 운영 검증이 필요합니다.
 
+Python SDK의 로컬 보관 로그는 `POST .../runs/{runId}/logs`에 `X-Labflow-Replay: true`와 원래 `X-Request-ID`를 함께 보내 복구합니다. 일반 로그와 같은 멱등성 작업으로 처리하여 응답 유실 후 복구도 중복 저장하지 않습니다. 복구에는 STDOUT/STDERR와 `recordedAt`이 필수이며 종료한 Run에서는 수집 시각이 종료 시각 이하여야 합니다. 인증·프로젝트 소속 검사는 그대로 적용하며 일반 종료 후 쓰기 금지는 유지합니다. `SdkRunHttpTests`와 실제 `PythonSdkIntegrationTests`에서 종료 후 복구·중복 제거를 확인합니다.
+
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
 `POST /api/v1/sdk/runs/{runId}/heartbeat`는 본문 없이 실행의 생존 시각을 서버 시계로 갱신합니다. 기존 프로젝트 접근 정책과 실행 잠금을 적용하며 종료된 실행에는 409를 반환합니다. SDK/웹 조회의 `lastHeartbeatAt`은 마지막 수신 시각이며 미수신 실행은 null입니다. 시간 역행으로 기존 생존 시각을 덮어쓰지 않습니다. 기존 MariaDB는 배포 전에 `database/run-heartbeat.sql`을 한 번 적용하고 새 DB는 갱신된 `database/runs.sql`을 사용합니다.
 
 SDK 상세와 웹 목록·상세는 실행 상태와 별도로 `connectionStatus`를 반환합니다. 서버 시각으로 마지막 Heartbeat부터 기본 2분 이상 경과하면 `DISCONNECTED`입니다. 첫 신호가 없으면 시작 시각을 기준으로 하며 그 전까지는 `WAITING`, 최근 신호가 있으면 `CONNECTED`, 종료한 실행은 `INACTIVE`입니다. `RUN_HEARTBEAT_TIMEOUT` 환경변수 또는 `labflow.runs.heartbeat.timeout` 설정으로 양수 Duration(`2m`, `120s` 등)을 지정합니다. 웹은 기존 5초 주기 조회로 표시를 갱신합니다.
 
-통신 단절은 프로세스 종료의 증거가 아니므로 **자동 FAILED 전환은 하지 않습니다**. 연결 끊김도 상태·집계에서는 `RUNNING`이며 종료 시각과 실패 사유는 비어 있습니다. 연결 상태는 조회 때 계산하므로 스케줄러나 추가 DB 마이그레이션은 필요 없습니다. 같은 Run에 Heartbeat가 다시 도착하면 `CONNECTED`로 복구되고 기록을 계속 받을 수 있습니다. SDK의 디스크 전송 큐, 프로세스 재시작 후 학습 재개 및 미전송 데이터 복구는 제공하지 않습니다.
+통신 단절은 프로세스 종료의 증거가 아니므로 **자동 FAILED 전환은 하지 않습니다**. 연결 끊김도 상태·집계에서는 `RUNNING`이며 종료 시각과 실패 사유는 비어 있습니다. 연결 상태는 조회 때 계산하므로 스케줄러나 추가 DB 마이그레이션은 필요 없습니다. 같은 Run에 Heartbeat가 다시 도착하면 `CONNECTED`로 복구되고 기록을 계속 받을 수 있습니다. SDK는 자동 stdout/stderr의 디스크 보관과 수동 재전송을 지원합니다. 명시적 지표 등 다른 기록의 디스크 큐와 프로세스 재시작 후 학습 재개는 제공하지 않습니다.
 
 `POST /api/v1/projects/{projectId}/runs/{runId}/stop`은 본문 없이 로그인한 프로젝트 소유자가 Run을 수동 종료하는 웹 API입니다. 쿠키 인증과 CSRF가 필요하며 PUBLIC 프로젝트도 소유자만 종료할 수 있습니다. 프로젝트 → 실행 순서로 잠가 SDK의 기록·Heartbeat·종료 및 프로젝트 삭제와 직렬화합니다. `FAILED`, 서버 종료 시각, `Manually stopped by project owner` 사유를 저장합니다. 같은 수동 종료 재요청은 204와 기존 종료 시각을 유지하며 이미 완료됐거나 다른 사유로 실패한 Run에는 409, URL의 프로젝트에 속하지 않는 Run에는 404를 반환합니다. 클라이언트 프로세스를 원격으로 중지하는 기능은 아닙니다.
 

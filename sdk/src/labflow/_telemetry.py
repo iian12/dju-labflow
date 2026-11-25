@@ -8,8 +8,12 @@ import time
 import warnings
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+from uuid import uuid4
+
+import psutil
 
 from . import _context
+from ._spool import PendingLog
 from ._validation import truncate
 from ._version import __version__
 
@@ -162,10 +166,23 @@ class Telemetry:
         self.capture_output = capture_output
         self.system_interval = system_interval
         self.heartbeat_interval = heartbeat_interval
-        self.pending: queue.Queue[dict] = queue.Queue(maxsize=1000)
+        self.pending: queue.Queue[PendingLog] = queue.Queue(maxsize=1000)
         self.buffers = {"STDOUT": "", "STDERR": ""}
+        self._buffer_ids = {source: str(uuid4()) for source in self.buffers}
+        self._checkpoint_counts = {source: 0 for source in self.buffers}
+        self._checkpoint_lost = {source: False for source in self.buffers}
+        self._owner = (psutil.Process().pid, psutil.Process().create_time())
         self.wake = threading.Event()
         self.stopping = threading.Event()
+        self.abandoned = threading.Event()
+        self._state_lock = threading.RLock()
+        self._stop_lock = threading.Lock()
+        self._stop_started = False
+        self._active: PendingLog | None = None
+        self._spooled_logs = 0
+        self._unpersisted_logs = 0
+        self.flush_timed_out = False
+        self._http = run._client._telemetry_http()
         self.errors = 0
         self.dropped_logs = 0
         self.last_error: str | None = None
@@ -179,12 +196,16 @@ class Telemetry:
             self.thread.start()
         except Exception:
             _detach(self)
+            self._http.close()
             raise
 
     def output(self, source: str, value: str) -> None:
         # Called under _capture_lock, including writes from other application threads.
+        if not value:
+            return
         value = value.encode("utf-8", errors="replace").decode("utf-8")
         self.buffers[source] += value
+        logs: list[PendingLog] = []
         while self.buffers[source]:
             buffer = self.buffers[source]
             newline = buffer.find("\n")
@@ -206,25 +227,28 @@ class Telemetry:
                     # A single unusually long credential may exceed the API's log limit.
                     if buffer.startswith(key):
                         self.buffers[source] = buffer[len(key) :]
-                        self._enqueue(source, "[REDACTED]")
+                        logs.extend(self._logs(source, "[REDACTED]"))
                         continue
                     break
                 piece = buffer[:boundary]
                 self.buffers[source] = buffer[boundary:]
-                self._enqueue(source, piece)
+                logs.extend(self._logs(source, piece))
                 continue
             else:
                 break
             self.buffers[source] = buffer[len(piece) :]
-            self._enqueue(source, piece)
+            logs.extend(self._logs(source, piece))
+        self._capture(source, logs)
 
     def flush_output(self, source: str) -> None:
         value, self.buffers[source] = self.buffers[source], ""
         if value:
-            self._enqueue(source, value)
+            self._capture(source, self._logs(source, value))
 
-    def _enqueue(self, source: str, message: str) -> None:
-        message = self.run._client._redact(message)
+    def _logs(self, source: str, message: str, *, redact: bool = True) -> list[PendingLog]:
+        if redact:
+            message = self.run._client._redact(message)
+        logs = []
         while message:
             piece = truncate(message, 16000)
             message = message[len(piece) :]
@@ -234,18 +258,105 @@ class Telemetry:
                 "level": "ERROR" if source == "STDERR" else "INFO",
                 "recordedAt": datetime.now(timezone.utc).isoformat(),
             }
-            try:
-                self.pending.put_nowait(body)
-                self.wake.set()
-            except queue.Full:
-                self.dropped_logs += 1
+            log = PendingLog(f"{self.run._path}/logs", body)
+            logs.append(log)
+        return logs
 
-    def stop(self) -> None:
-        _detach(self)
-        self.stopping.set()
-        self.wake.set()
-        if self.thread.ident is not None and threading.current_thread() is not self.thread:
-            self.thread.join()
+    def _partial(self, source: str) -> str:
+        buffer = self.buffers[source]
+        key = self.run._client._api_key
+        # Mask recognizable credential prefixes in partial checkpoints as well.
+        for length in range(min(len(buffer), len(key) - 1), 3, -1):
+            if buffer.endswith(key[:length]):
+                return self.run._client._redact(buffer[:-length]) + "[REDACTED]"
+        return self.run._client._redact(buffer)
+
+    def _capture(self, source: str, logs: list[PendingLog]) -> None:
+        checkpoint = self._logs(source, self._partial(source), redact=False)
+        with self._state_lock:
+            try:
+                saved = self.run._client._spool.capture(
+                    self._buffer_ids[source],
+                    self._owner,
+                    logs,
+                    checkpoint,
+                )
+            except Exception:
+                saved = False
+            if self._checkpoint_lost[source]:
+                self._unpersisted_logs -= 1
+                self.dropped_logs -= 1
+                self._checkpoint_lost[source] = False
+            if saved:
+                self._spooled_logs += len(logs)
+                self._checkpoint_counts[source] = len(checkpoint)
+                for log in logs:
+                    log._storage = "saved"
+                    try:
+                        self.pending.put_nowait(log)
+                    except queue.Full:
+                        pass  # Already durable; manual replay can send it later.
+                self.wake.set()
+            else:
+                lost = len(logs) + bool(checkpoint)
+                self._unpersisted_logs += lost
+                self.dropped_logs += lost
+                self._checkpoint_lost[source] = bool(checkpoint)
+        if not saved:
+            self._warning(
+                "LabFlow could not preserve some automatic logs; check "
+                "run.telemetry_status and spool capacity or directory permissions"
+            )
+
+    @property
+    def spooled_logs(self) -> int:
+        with self._state_lock:
+            return self._spooled_logs + sum(self._checkpoint_counts.values())
+
+    @property
+    def unpersisted_logs(self) -> int:
+        with self._state_lock:
+            return self._unpersisted_logs
+
+    @staticmethod
+    def _warning(message: str) -> None:
+        sending = getattr(_local, "sending", False)
+        _local.sending = True
+        try:
+            warnings.warn(message, RuntimeWarning, stacklevel=3)
+        except Exception:
+            pass
+        finally:
+            _local.sending = sending
+
+    def stop(self, *, timeout: float | None = None) -> None:
+        with self._stop_lock:
+            if self._stop_started:
+                return
+            self._stop_started = True
+            _detach(self)
+            self.stopping.set()
+            self.wake.set()
+            if self.thread.ident is None:
+                self._http.close()
+            elif threading.current_thread() is not self.thread:
+                self.thread.join(
+                    timeout=self.run._client._flush_timeout if timeout is None else timeout
+                )
+            if self.thread.is_alive():
+                self.flush_timed_out = True
+                self.abandoned.set()
+                with self._state_lock:
+                    while True:
+                        try:
+                            self.pending.get_nowait()
+                        except queue.Empty:
+                            break
+                self._warning(
+                    "LabFlow automatic log flush deadline reached; pending logs were "
+                    "saved locally where possible. Check run.telemetry_status and "
+                    "use Client.replay_pending() to resend them"
+                )
 
     def _attempt(self, action) -> None:
         try:
@@ -255,19 +366,26 @@ class Telemetry:
             self.last_error = type(error).__name__
             if not self._warned:
                 self._warned = True
-                sending = getattr(_local, "sending", False)
-                _local.sending = True
-                try:
-                    warnings.warn(
-                        f"LabFlow automatic recording failed ({self.last_error}); "
-                        "check run.telemetry_status for details",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
-                except Exception:
-                    pass
-                finally:
-                    _local.sending = sending
+                self._warning(
+                    f"LabFlow automatic recording failed ({self.last_error}); "
+                    "check run.telemetry_status for details"
+                )
+
+    def _send_log(self, log: PendingLog) -> None:
+        # On any failure the durable record remains available for manual replay.
+        self.run._client._request(
+            "POST",
+            log.path,
+            body=log.body,
+            request_id=log.request_id,
+            _http=self._http,
+            _cancel=self.abandoned,
+        )
+        with self._state_lock:
+            if log._storage == "saved":
+                self.run._client._spool.remove(log)
+                self._spooled_logs -= 1
+                log._storage = None
 
     def _work(self) -> None:
         _local.sending = True
@@ -284,21 +402,31 @@ class Telemetry:
             first_sample = True
             while True:
                 self.wake.clear()
+                with self._state_lock:
+                    if self.abandoned.is_set():
+                        break
+                    try:
+                        self._active = self.pending.get_nowait()
+                    except queue.Empty:
+                        self._active = None
                 # Check timers between requests so busy stdout cannot starve periodic work.
-                try:
-                    body = self.pending.get_nowait()
-                except queue.Empty:
-                    pass
-                else:
-                    self._attempt(
-                        lambda: self.run._client._request(
-                            "POST", f"{self.run._path}/logs", body=body
-                        )
-                    )
+                if self._active is not None:
+                    self._attempt(lambda: self._send_log(self._active))
+                    with self._state_lock:
+                        self._active = None
+                if self.abandoned.is_set():
+                    break
                 now = time.monotonic()
                 collect = first_sample or not self.stopping.is_set()
                 if collect and self.heartbeat_interval is not None and now >= next_heartbeat:
-                    self._attempt(self.run.heartbeat)
+                    self._attempt(
+                        lambda: self.run._client._request(
+                            "POST",
+                            f"{self.run._path}/heartbeat",
+                            _http=self._http,
+                            _cancel=self.abandoned,
+                        )
+                    )
                     next_heartbeat = time.monotonic() + self.heartbeat_interval
                 if collect and collector is not None and now >= next_system:
 
@@ -313,6 +441,8 @@ class Telemetry:
                                     "elapsedTime": time.monotonic() - self.run._started,
                                     "recordedAt": datetime.now(timezone.utc).isoformat(),
                                 },
+                                _http=self._http,
+                                _cancel=self.abandoned,
                             )
 
                     self._attempt(record_system)
@@ -335,6 +465,7 @@ class Telemetry:
                     continue
                 self.wake.wait(delay)
         finally:
+            self._http.close()
             if collector is not None:
                 collector.close()
             _local.sending = False

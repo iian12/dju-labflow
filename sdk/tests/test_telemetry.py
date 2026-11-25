@@ -212,12 +212,15 @@ def test_automatic_http_failure_does_not_break_output_or_retry(monkeypatch):
             "errors": 2,
             "dropped_logs": 0,
             "last_error": "NetworkError",
+            "spooled_logs": 2,
+            "unpersisted_logs": 0,
+            "flush_timed_out": False,
         }
     assert stdout.getvalue() == "keep training\nnext step\n"
     assert len(messages(requests)) == 2
 
 
-def test_bounded_queue_reports_dropped_logs(server):
+def test_bounded_queue_keeps_overflow_on_disk(server):
     with connect(
         server, capture_output=False, system_metrics_interval=None, heartbeat_interval=None
     ) as client:
@@ -225,7 +228,9 @@ def test_bounded_queue_reports_dropped_logs(server):
         telemetry = Telemetry(run, False, None, None)  # No worker: deterministic overflow.
         telemetry.output("STDOUT", "line\n" * 1002)
         assert telemetry.pending.qsize() == 1000
-        assert telemetry.dropped_logs == 2
+        assert telemetry.dropped_logs == 0
+        assert telemetry.spooled_logs == 1002
+        telemetry.stop()
         run.close()
 
 

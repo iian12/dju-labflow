@@ -14,6 +14,7 @@ from uuid import uuid4
 import httpx
 
 from . import _validation as validate
+from ._spool import Spool
 from ._validation import Scalar
 from .errors import (
     ApiError,
@@ -53,6 +54,10 @@ class Client:
         system_metrics_interval: float | None = 10.0,
         heartbeat_interval: float | None = 30.0,
         max_retries: int = 0,
+        flush_timeout: float = 10.0,
+        spool_directory: str | Path | None = None,
+        spool_retention_days: float = 7.0,
+        spool_max_bytes: int = 100 * 1024 * 1024,
     ) -> None:
         key = api_key if api_key is not None else os.getenv("LABFLOW_API_KEY")
         if not isinstance(key, str) or not key or any(not 33 <= ord(c) <= 126 for c in key):
@@ -103,8 +108,27 @@ class Client:
         self._capture_output = capture_output
         self._system_metrics_interval = system_metrics_interval
         self._heartbeat_interval = heartbeat_interval
+        try:
+            self._flush_timeout = validate.number(flush_timeout, "flush_timeout", nonnegative=True)
+            retention = validate.number(
+                spool_retention_days, "spool_retention_days", nonnegative=True
+            )
+            if retention == 0:
+                raise ValidationError("spool_retention_days must be positive")
+            capacity = validate.integer(spool_max_bytes, "spool_max_bytes", minimum=1)
+            directory = (
+                Path(spool_directory)
+                if spool_directory is not None
+                else Path(os.getenv("LABFLOW_SPOOL_DIR", str(Path.home() / ".labflow" / "spool")))
+            )
+        except (ValidationError, TypeError, ValueError):
+            raise ConfigurationError(
+                "Use a nonnegative flush_timeout, valid spool directory, "
+                "positive retention days and integer capacity"
+            ) from None
+        self._spool = Spool(directory, url.rstrip("/") + "/", retention, capacity)
         self._runs: set[Run] = set()
-        self._http = httpx.Client(
+        self._http_options = dict(
             base_url=url.rstrip("/") + "/",
             headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
             timeout=seconds,
@@ -112,6 +136,53 @@ class Client:
             trust_env=False,
             transport=transport,
         )
+        self._http = httpx.Client(**self._http_options)
+
+    def _telemetry_http(self) -> httpx.Client:
+        # A timed-out worker owns its connection pool until its in-flight request returns.
+        # Closing the foreground client must not wait for or close that pool.
+        options = dict(self._http_options)
+        if options["transport"] is not None:
+            original = options["transport"]
+
+            class BorrowedTransport(httpx.BaseTransport):
+                def handle_request(self, request):
+                    return original.handle_request(request)
+
+            options["transport"] = BorrowedTransport()
+        return httpx.Client(**options)
+
+    def replay_pending(self, *, limit: int = 1000) -> dict:
+        """Replay this backend's saved automatic logs with their original request identities."""
+        if self.closed:
+            raise RunStateError("Client is closed")
+        limit = validate.integer(limit, "Replay limit", maximum=10000, minimum=1)
+        logs, expired = self._spool.read(limit)
+        sent = failed = 0
+        last_error = None
+        for log in logs:
+            try:
+                self._request(
+                    "POST", log.path, body=log.body, request_id=log.request_id, _replay=True
+                )
+                self._spool.remove(log)
+                sent += 1
+            except ApiError as error:
+                failed += 1
+                last_error = type(error).__name__
+                if error.status_code >= 500 or error.status_code == 429:
+                    break
+            except (NetworkError, ProtocolError, OSError) as error:
+                failed += 1
+                last_error = type(error).__name__
+                break
+        return {
+            "sent": sent,
+            "remaining": self._spool.count(),
+            "failed": failed,
+            "expired": expired,
+            "last_error": last_error,
+        }
 
     def __repr__(self) -> str:
         return f"Client(closed={self.closed})"
@@ -130,7 +201,10 @@ class Client:
 
     def close(self) -> None:
         """Release HTTP resources; run completion is an explicit operation."""
+        deadline = time.monotonic() + self._flush_timeout
         for run in tuple(self._runs):
+            if run._telemetry is not None:
+                run._telemetry.stop(timeout=max(0, deadline - time.monotonic()))
             run.close()
         self._http.close()
 
@@ -270,8 +344,12 @@ class Client:
         body: dict | None = None,
         expected: int = 204,
         request_id: str | None = None,
+        _http: httpx.Client | None = None,
+        _replay: bool = False,
+        _cancel=None,
     ) -> Any:
-        if self.closed:
+        http = self._http if _http is None else _http
+        if http.is_closed:
             raise RunStateError("Client is closed")
         writing = method in {"POST", "PUT", "PATCH", "DELETE"}
         if writing:
@@ -284,18 +362,26 @@ class Client:
                     "request_id must contain 1 to 64 ASCII letters, digits, - or _"
                 )
         # Freeze the body once, including automatically generated timestamps/elapsed time.
-        request = self._http.build_request(
+        headers = {"X-Request-ID": request_id} if writing else {}
+        if _replay:
+            headers["X-Labflow-Replay"] = "true"
+        request = http.build_request(
             method,
             path,
-            headers={"X-Request-ID": request_id} if writing else {},
+            headers=headers,
             **({"json": body} if body is not None else {}),
         )
         for attempt in range(self._max_retries + 1):
+            if _cancel is not None and _cancel.is_set():
+                raise RunStateError("Automatic recording stopped")
             try:
-                response = self._http.send(request)
+                response = http.send(request)
             except httpx.RequestError:
                 if attempt < self._max_retries:
-                    time.sleep(0.2 * 2**attempt)
+                    if _cancel is None:
+                        time.sleep(0.2 * 2**attempt)
+                    else:
+                        _cancel.wait(0.2 * 2**attempt)
                     continue
                 raise NetworkError(
                     "LabFlow connection failed or timed out; server-side outcome may be unknown. "
@@ -305,7 +391,10 @@ class Client:
                 ) from None
             if response.status_code in {502, 503, 504} and attempt < self._max_retries:
                 response.close()
-                time.sleep(0.2 * 2**attempt)
+                if _cancel is None:
+                    time.sleep(0.2 * 2**attempt)
+                else:
+                    _cancel.wait(0.2 * 2**attempt)
                 continue
             break
         if 300 <= response.status_code < 400:

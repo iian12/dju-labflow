@@ -5,6 +5,7 @@ import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
 import com.dju.labflow.run.run.application.RunHeartbeatPolicy;
 import com.dju.labflow.run.run.application.RunRecordService;
 import com.dju.labflow.run.run.application.RunService;
+import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.sdk.request.application.SdkRequestService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import java.net.URI;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -86,7 +88,7 @@ public class SdkRunController {
                         null,
                         request.toCommand(),
                         () -> runService.create(principal, request.toCommand()));
-        var location =
+        URI location =
                 ServletUriComponentsBuilder.fromCurrentRequestUri()
                         .path("/{runId}")
                         .buildAndExpand(runId.value())
@@ -100,7 +102,7 @@ public class SdkRunController {
     public ResponseEntity<RunResponse> get(
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
             @Positive @PathVariable("runId") Long runId) {
-        var run = runService.get(principal, RunId.of(runId));
+        Run run = runService.get(principal, RunId.of(runId));
         return ResponseEntity.ok(RunResponse.from(run, heartbeats.status(run)));
     }
 
@@ -165,11 +167,18 @@ public class SdkRunController {
             @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
             @Parameter(
                             description =
+                                    "로컬 보관 stdout/stderr 복구. 요청 ID와 수집 시각 필수이며 종료 시각 이후 로그는 거부합니다.")
+                    @RequestHeader(value = "X-Labflow-Replay", defaultValue = "false")
+                    boolean replay,
+            @Parameter(
+                            description =
                                     "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
                     @RequestHeader(value = "X-Request-ID", required = false)
                     String requestId,
             @Positive @PathVariable("runId") Long runId,
             @Valid @RequestBody LogCreateRequest request) {
+        if (replay && requestId == null)
+            throw new IllegalArgumentException("Recovered logs require X-Request-ID");
         requestService.execute(
                 principal,
                 requestId,
@@ -177,7 +186,10 @@ public class SdkRunController {
                 RunId.of(runId),
                 request.toCommand(),
                 () -> {
-                    runRecordService.log(principal, RunId.of(runId), request.toCommand());
+                    if (replay)
+                        runRecordService.recoverLog(
+                                principal, RunId.of(runId), request.toCommand());
+                    else runRecordService.log(principal, RunId.of(runId), request.toCommand());
                     return RunId.of(runId);
                 });
         return ResponseEntity.noContent().build();

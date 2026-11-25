@@ -72,6 +72,10 @@ def init(
     system_metrics_interval: float | None = 10.0,
     heartbeat_interval: float | None = 30.0,
     max_retries: int = 0,
+    flush_timeout: float = 10.0,
+    spool_directory: str | Path | None = None,
+    spool_retention_days: float = 7.0,
+    spool_max_bytes: int = 100 * 1024 * 1024,
     request_id: str | None = None,
 ) -> Run:
     previous = _context.current.get()
@@ -91,6 +95,10 @@ def init(
         system_metrics_interval=system_metrics_interval,
         heartbeat_interval=heartbeat_interval,
         max_retries=max_retries,
+        flush_timeout=flush_timeout,
+        spool_directory=spool_directory,
+        spool_retention_days=spool_retention_days,
+        spool_max_bytes=spool_max_bytes,
     )
     try:
         run = client.start_run(name, metadata=metadata, request_id=request_id)

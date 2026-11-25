@@ -48,6 +48,9 @@ class Run:
             "errors": telemetry.errors if telemetry else 0,
             "dropped_logs": telemetry.dropped_logs if telemetry else 0,
             "last_error": telemetry.last_error if telemetry else None,
+            "spooled_logs": telemetry.spooled_logs if telemetry else 0,
+            "unpersisted_logs": telemetry.unpersisted_logs if telemetry else 0,
+            "flush_timed_out": telemetry.flush_timed_out if telemetry else False,
         }
 
     def _stop_telemetry(self) -> None:

@@ -11,6 +11,7 @@ import pytest
 
 import labflow
 from labflow import AuthenticationError, Client, ConflictError, NotFoundError, PermissionDeniedError
+from labflow._spool import PendingLog
 
 pytestmark = pytest.mark.backend
 
@@ -142,7 +143,18 @@ def test_automatic_telemetry(settings, client):
             time.sleep(0.05)
         else:
             pytest.fail("Periodic heartbeats were not received")
-        assert run.telemetry_status == {"errors": 0, "dropped_logs": 0, "last_error": None}
+        # Heartbeats and log sends run independently; wait for complete lines to be acknowledged.
+        deadline = time.monotonic() + 10
+        while run.telemetry_status["spooled_logs"] != 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert run.telemetry_status == {
+            "errors": 0,
+            "dropped_logs": 0,
+            "last_error": None,
+            "spooled_logs": 1,  # The unflushed partial output is already durable.
+            "unpersisted_logs": 0,
+            "flush_timed_out": False,
+        }
         with Client(api_key=other_key, base_url=url) as other:
             with pytest.raises(PermissionDeniedError):
                 other._request("POST", f"{run._path}/heartbeat")
@@ -154,6 +166,21 @@ def test_automatic_telemetry(settings, client):
     time.sleep(0.1)
     assert client.get_run(run.id)["lastHeartbeatAt"] == status["lastHeartbeatAt"]
     assert run.telemetry_status["errors"] == 0
+    # A restarted client can recover an unsent capture after the run completed.
+    pending = PendingLog(
+        f"{run._path}/logs",
+        {
+            "message": "recovered after completion",
+            "source": "STDOUT",
+            "level": "INFO",
+            "recordedAt": status["startedAt"],
+        },
+    )
+    assert client._spool.save([pending]) == {pending.request_id}
+    assert client.replay_pending()["sent"] == 1
+    # Losing the replay acknowledgement also remains idempotent on the actual backend.
+    client._spool.save([pending])
+    assert client.replay_pending()["sent"] == 1
 
 
 def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):

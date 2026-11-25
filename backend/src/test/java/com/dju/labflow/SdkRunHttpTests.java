@@ -6,7 +6,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.dju.labflow.auth.infrastructure.jwt.AccessTokenProvider;
 import com.dju.labflow.project.key.application.IssueProjectApiKeyCommand;
+import com.dju.labflow.project.key.application.IssueProjectApiKeyResult;
 import com.dju.labflow.project.key.application.ProjectApiKeyService;
+import com.dju.labflow.project.key.domain.ProjectApiKey;
 import com.dju.labflow.project.key.domain.repository.ProjectApiKeyRepository;
 import com.dju.labflow.project.key.util.ProjectApiKeyHasher;
 import com.dju.labflow.project.project.domain.*;
@@ -41,9 +43,11 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -53,6 +57,94 @@ import tools.jackson.databind.json.JsonMapper;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class SdkRunHttpTests {
+    @Test
+    void recoversOfflineOutputAfterTerminationAndDeduplicatesLostAcknowledgements()
+            throws Exception {
+        Client client = client();
+        RunId id = create(client);
+        String captured = Instant.now().toString();
+        String body =
+                jsonMapper.writeValueAsString(
+                        Map.of(
+                                "message",
+                                "offline stdout",
+                                "level",
+                                "INFO",
+                                "source",
+                                "STDOUT",
+                                "recordedAt",
+                                captured));
+        identified(client, path(id) + "/logs", body, "ack-lost").andExpect(status().isNoContent());
+        write(client, id, "/complete", null).andExpect(status().isNoContent());
+        write(client, id, "/logs", body).andExpect(status().isConflict());
+        for (String requestId : List.of("ack-lost", "offline-new", "offline-new")) {
+            mvc.perform(
+                            post(path(id) + "/logs")
+                                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
+                                    .header("X-Request-ID", requestId)
+                                    .header("X-Labflow-Replay", "true")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(body))
+                    .andExpect(status().isNoContent());
+        }
+        assertThat(logs.findByRunId(id, 100)).hasSize(2);
+        mvc.perform(
+                        post(path(id) + "/logs")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + client().rawKey())
+                                .header("X-Request-ID", "other-project")
+                                .header("X-Labflow-Replay", "true")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void rejectsRecoveryWithoutIdentityTimestampOrOutputSourceAndAfterTermination()
+            throws Exception {
+        Client client = client();
+        RunId id = create(client);
+        write(client, id, "/complete", null).andExpect(status().isNoContent());
+        for (Map<String, String> payload :
+                List.of(
+                        Map.of("message", "missing timestamp", "level", "INFO", "source", "STDOUT"),
+                        Map.of(
+                                "message",
+                                "not output",
+                                "level",
+                                "INFO",
+                                "source",
+                                "USER",
+                                "recordedAt",
+                                "2026-01-01T00:00:00Z"),
+                        Map.of(
+                                "message",
+                                "too late",
+                                "level",
+                                "INFO",
+                                "source",
+                                "STDOUT",
+                                "recordedAt",
+                                "2099-01-01T00:00:00Z"))) {
+            mvc.perform(
+                            post(path(id) + "/logs")
+                                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
+                                    .header("X-Request-ID", "invalid")
+                                    .header("X-Labflow-Replay", "true")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(jsonMapper.writeValueAsString(payload)))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(
+                        post(path(id) + "/logs")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
+                                .header("X-Labflow-Replay", "true")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"message\":\"no identity\",\"level\":\"INFO\",\"source\":\"STDOUT\",\"recordedAt\":\"2026-01-01T00:00:00Z\"}"))
+                .andExpect(status().isBadRequest());
+        assertThat(logs.findByRunId(id, 100)).isEmpty();
+    }
+
     @Test
     void textAndLogsRoundTripTheirFullUnicodeLimits() throws Exception {
         Client client = client();
@@ -109,13 +201,13 @@ class SdkRunHttpTests {
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status -> {
-                            var runs =
+                            List<RunEntity> runs =
                                     em.createQuery(
                                                     "select r from RunEntity r where r.createdBy in :ids",
                                                     RunEntity.class)
                                             .setParameter("ids", owners)
                                             .getResultList();
-                            var ids = runs.stream().map(RunEntity::getId).toList();
+                            List<Long> ids = runs.stream().map(RunEntity::getId).toList();
                             em.createQuery(
                                             "delete from SdkRequestEntity r where r.projectId in "
                                                     + "(select p.id from ProjectEntity p where p.createdBy in :ids)")
@@ -262,7 +354,7 @@ class SdkRunHttpTests {
     void authenticatedKeyDeterminesProjectAndSameProjectKeysShareAccess() throws Exception {
         Client owner = client();
         Client other = client();
-        var response =
+        MockHttpServletResponse response =
                 mvc.perform(
                                 post(BASE)
                                         .header(
@@ -280,7 +372,7 @@ class SdkRunHttpTests {
                         jsonMapper
                                 .readValue(response.getContentAsString(), RunCreateResponse.class)
                                 .runId());
-        var second =
+        IssueProjectApiKeyResult second =
                 issuance.issue(
                         owner.ownerId(),
                         owner.projectId(),
@@ -299,7 +391,7 @@ class SdkRunHttpTests {
         send(other, HttpMethod.GET, path(id), null)
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
-        for (var request : validWrites()) {
+        for (Write request : validWrites()) {
             write(other, id, request.suffix(), request.body())
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.code").value("FORBIDDEN"));
@@ -314,7 +406,7 @@ class SdkRunHttpTests {
     @NullAndEmptySource
     @ValueSource(strings = {"Bearer ", "Basic abc", "Bearer invalid-key"})
     void missingOrInvalidBearerKeyIs401(String authorization) throws Exception {
-        var request =
+        MockHttpServletRequestBuilder request =
                 post(BASE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"training\"}");
@@ -327,7 +419,7 @@ class SdkRunHttpTests {
     @Test
     void jwtCookieCannotReplaceSdkKeyAndDoesNotInterfereWithValidKey() throws Exception {
         Client client = client();
-        var cookie =
+        Cookie cookie =
                 new Cookie(
                         "access_token",
                         accessTokens.createAccessToken(client.ownerId(), Role.USER));
@@ -370,7 +462,7 @@ class SdkRunHttpTests {
     void revokedKeyCannotReadOrWriteExistingRun() throws Exception {
         Client client = client();
         RunId id = create(client);
-        var key = keys.findByKeyHash(hasher.hash(client.rawKey())).orElseThrow();
+        ProjectApiKey key = keys.findByKeyHash(hasher.hash(client.rawKey())).orElseThrow();
         key.revoke(Instant.now());
         keys.update(key);
         send(client, HttpMethod.GET, path(id), null).andExpect(status().isUnauthorized());
@@ -411,7 +503,7 @@ class SdkRunHttpTests {
                         .getContentAsString();
         write(client, id, "/complete", null).andExpect(status().isNoContent());
         send(client, HttpMethod.GET, path(id), null).andExpect(content().json(completed));
-        for (var request : validWrites()) {
+        for (Write request : validWrites()) {
             if (request.suffix().equals("/complete")) continue;
             write(client, id, request.suffix(), request.body())
                     .andExpect(status().isConflict())
@@ -481,7 +573,7 @@ class SdkRunHttpTests {
         send(client, HttpMethod.GET, path(missing), null)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RUN_NOT_FOUND"));
-        for (var request : validWrites()) {
+        for (Write request : validWrites()) {
             write(client, missing, request.suffix(), request.body())
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("RUN_NOT_FOUND"));
@@ -561,7 +653,7 @@ class SdkRunHttpTests {
 
     @Test
     void openApiDocumentsBearerOnlySecurityAndActualDtoContract() throws Exception {
-        var result =
+        ResultActions result =
                 mvc.perform(get("/v3/api-docs"))
                         .andExpect(status().isOk())
                         .andExpect(
@@ -628,7 +720,7 @@ class SdkRunHttpTests {
     void duplicateCreateReturnsOriginalResultAndCanonicalizesMetadataOrder() throws Exception {
         Client client = client();
         String firstBody = "{\"name\":\"dedupe\",\"metadata\":{\"b\":\"2\",\"a\":\"1\"}}";
-        var first =
+        MockHttpServletResponse first =
                 identified(client, BASE, firstBody, "create-1")
                         .andExpect(status().isCreated())
                         .andReturn()
@@ -647,7 +739,7 @@ class SdkRunHttpTests {
         identified(client, BASE, "{\"name\":\"different\"}", "create-1")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
-        var secondKey =
+        IssueProjectApiKeyResult secondKey =
                 issuance.issue(
                         client.ownerId(),
                         client.projectId(),
@@ -836,7 +928,7 @@ class SdkRunHttpTests {
 
     private ResultActions identified(Client client, String path, String body, String requestId)
             throws Exception {
-        var request =
+        MockHttpServletRequestBuilder request =
                 request(path.endsWith("/parameters") ? HttpMethod.PUT : HttpMethod.POST, path)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
                         .header("X-Request-ID", requestId);
@@ -857,7 +949,7 @@ class SdkRunHttpTests {
     }
 
     private RunId create(Client client) throws Exception {
-        var response =
+        MockHttpServletResponse response =
                 send(
                                 client,
                                 HttpMethod.POST,
@@ -887,7 +979,7 @@ class SdkRunHttpTests {
 
     private ResultActions send(Client client, HttpMethod method, String path, String body)
             throws Exception {
-        var request =
+        MockHttpServletRequestBuilder request =
                 request(method, path)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey());
         if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
@@ -919,7 +1011,7 @@ class SdkRunHttpTests {
                                 user.getId(),
                                 ProjectVisibility.PUBLIC,
                                 Instant.now()));
-        var issued =
+        IssueProjectApiKeyResult issued =
                 issuance.issue(user.getId(), project.getId(), new IssueProjectApiKeyCommand("sdk"));
         return new Client(user.getId(), project.getId(), issued.rawApiKey());
     }

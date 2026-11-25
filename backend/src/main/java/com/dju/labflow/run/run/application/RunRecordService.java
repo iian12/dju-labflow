@@ -24,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -69,8 +70,8 @@ public class RunRecordService {
             ProjectApiKeyPrincipal principal, RunId runId, RunParameterCommand command) {
         requestValidator.validate(command);
         requireRunning(principal, runId);
-        var ids = new ArrayList<RunParameterId>();
-        var existingParameters =
+        ArrayList<RunParameterId> ids = new ArrayList<>();
+        Map<String, RunParameter> existingParameters =
                 runParameterRepository.findByRunId(runId).stream()
                         .collect(Collectors.toMap(RunParameter::getKey, Function.identity()));
         long newKeys =
@@ -80,14 +81,15 @@ public class RunRecordService {
         if (existingParameters.size() + newKeys > 100)
             throw new IllegalArgumentException("Run parameters exceed 100 entries");
         Instant now = clock.instant();
-        for (var entry : command.parameters().entrySet()) {
-            var existing = Optional.ofNullable(existingParameters.get(entry.getKey()));
+        for (Map.Entry<String, String> entry : command.parameters().entrySet()) {
+            Optional<RunParameter> existing =
+                    Optional.ofNullable(existingParameters.get(entry.getKey()));
             if (existing.isPresent()) {
                 if (!existing.get().getValue().equals(entry.getValue()))
                     throw new RunStateConflictException("Parameter value cannot be changed");
                 ids.add(existing.get().getId());
             } else {
-                var record =
+                RunParameter record =
                         RunParameter.create(
                                 RunParameterId.of(idGenerator.nextId()),
                                 runId,
@@ -104,10 +106,10 @@ public class RunRecordService {
             ProjectApiKeyPrincipal principal, RunId runId, RunMetricCommand command) {
         requestValidator.validate(command);
         requireRunning(principal, runId);
-        var ids = new ArrayList<RunMetricId>();
+        ArrayList<RunMetricId> ids = new ArrayList<>();
         Instant recordedAt = recordedAt(command.recordedAt());
-        for (var entry : command.metrics().entrySet()) {
-            var record =
+        for (Map.Entry<String, Double> entry : command.metrics().entrySet()) {
+            RunMetric record =
                     RunMetric.create(
                             RunMetricId.of(idGenerator.nextId()),
                             runId,
@@ -125,6 +127,26 @@ public class RunRecordService {
     public RunLogId log(ProjectApiKeyPrincipal principal, RunId runId, RunLogCommand command) {
         requestValidator.validate(command);
         requireRunning(principal, runId);
+        return saveLog(runId, command);
+    }
+
+    /** Offline stdout/stderr captured before termination can be recovered after a run ends. */
+    public RunLogId recoverLog(
+            ProjectApiKeyPrincipal principal, RunId runId, RunLogCommand command) {
+        requestValidator.validate(command);
+        Run run = runAccessPolicy.requireOwnedForUpdate(principal, runId);
+        if (command.recordedAt() == null
+                || (command.source() != RunLogSource.STDOUT
+                        && command.source() != RunLogSource.STDERR))
+            throw new IllegalArgumentException(
+                    "Recovered logs require a capture timestamp and STDOUT/STDERR source");
+        if (run.getEndedAt() != null && command.recordedAt().isAfter(run.getEndedAt()))
+            throw new IllegalArgumentException(
+                    "Recovered logs must have been captured before run termination");
+        return saveLog(runId, command);
+    }
+
+    private RunLogId saveLog(RunId runId, RunLogCommand command) {
         return runLogRepository
                 .save(
                         RunLog.create(
