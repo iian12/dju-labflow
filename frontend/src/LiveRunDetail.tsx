@@ -8,10 +8,11 @@ import { recordKind, recordKinds, recordPageUrl } from './runRecordsApi.ts';
 import type { RecordPage } from './runRecordsApi.ts';
 import { Badge, date, duration, ErrorBox, Modal } from './LiveShared.tsx';
 const tabs = [['metrics','Metrics'],['parameters','Parameters'],['logs','Logs'],['texts','Texts'],['system-metrics','System'],['artifacts','Artifacts'],['environment','Environment']];
+type ParametersResponse = { parameters: { key: string; value: string }[] };
 export default function LiveRunDetail({ projectId, runId, tab, scope, compare, owner }: { projectId: string; runId: string; tab: string; scope: string; compare: () => void; owner: boolean }) {
   const path = `${projectPath(projectId)}/runs/${encodeURIComponent(runId)}`;
   const run = useApi<LiveRun>(path, scope, 5000);
-  const parameters = useApi<{ parameters: { key: string; value: string }[] }>(['parameters','artifacts'].includes(tab) ? `${path}/records?limit=1` : null, scope);
+  const parameters = useApi<ParametersResponse>(tab === 'parameters' ? `${path}/records?limit=1` : null, scope);
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>();
   const [stopOpen, setStopOpen] = useState(false), [stopBusy, setStopBusy] = useState(false), [stopError, setStopError] = useState<unknown>();
   async function stopRun() {
@@ -23,7 +24,8 @@ export default function LiveRunDetail({ projectId, runId, tab, scope, compare, o
   async function exportRecords() {
     if (busy) return; setBusy(true); setError(undefined);
     try {
-      const output: Record<string, unknown> = { run: run.data, parameters: parameters.data?.parameters ?? [] };
+      const records = await api<ParametersResponse>(`${path}/records?limit=1`);
+      const output: Record<string, unknown> = { run: run.data, parameters: records.parameters };
       for (const kind of recordKinds) {
         const items: RecordPage['items'] = []; let next: string | null = null;
         do { const url: string = next ? recordPageUrl(projectId, runId, kind.id, { direction: 'after', cursor: next }, 1000) : `${path}/records/${kind.id}?limit=1000`;
