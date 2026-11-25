@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS run_metric_entity (
     step BIGINT,
     elapsed_time DOUBLE,
     recorded_at DATETIME(6) NOT NULL,
-    INDEX idx_run_metric_time (run_id, recorded_at, id)
+    INDEX idx_run_metric_time (run_id, recorded_at, id),
+    INDEX idx_run_metric_latest (run_id, metric_key, recorded_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS run_log_entity (

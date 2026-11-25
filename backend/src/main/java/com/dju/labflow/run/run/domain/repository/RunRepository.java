@@ -4,6 +4,7 @@ import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
 import com.dju.labflow.run.run.domain.RunPage;
+import com.dju.labflow.run.run.domain.RunSearch;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,5 +22,9 @@ public interface RunRepository {
 
     List<Run> findByProjectId(ProjectId projectId, int limit);
 
-    RunPage findPageByProjectId(ProjectId projectId, int page, int size);
+    default RunPage findPageByProjectId(ProjectId projectId, int page, int size) {
+        return findPageByProjectId(projectId, page, size, RunSearch.all());
+    }
+
+    RunPage findPageByProjectId(ProjectId projectId, int page, int size, RunSearch search);
 }

@@ -12,7 +12,10 @@ import lombok.*;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(
         name = "run_metric_entity",
-        indexes = @Index(name = "idx_run_metric_time", columnList = "run_id,recorded_at,id"))
+        indexes = {
+            @Index(name = "idx_run_metric_time", columnList = "run_id,recorded_at,id"),
+            @Index(name = "idx_run_metric_latest", columnList = "run_id,metric_key,recorded_at,id")
+        })
 public class RunMetricEntity extends AssignedIdEntity {
     @Column(name = "run_id", nullable = false, updatable = false)
     private Long runId;

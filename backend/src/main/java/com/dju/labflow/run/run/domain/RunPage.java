@@ -10,9 +10,15 @@ public record RunPage(
         long totalElements,
         long running,
         long completed,
-        long failed) {
+        long failed,
+        List<String> availableMetrics) {
     public RunPage {
         items = List.copyOf(items);
+        availableMetrics = List.copyOf(availableMetrics);
+    }
+
+    public long projectTotal() {
+        return running + completed + failed;
     }
 
     public long totalPages() {

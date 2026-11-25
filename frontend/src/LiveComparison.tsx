@@ -11,7 +11,7 @@ export default function LiveComparison({ projectId, selected, runs, metric, metr
   const [differences, setDifferences] = useState(false);
   const baselineId = selected.includes(baseline) ? baseline : selected[0];
   const query = new URLSearchParams({ runIds: selected.join(','), metricKey: metric, baselineRunId: baselineId ?? '', differencesOnly: String(differences), maxPoints: '500' });
-  const result = useApi<Comparison>(selected.length >= 2 && metric ? `${projectPath(projectId)}/runs/compare?${query}` : null, scope, 5000);
+  const result = useApi<Comparison>(selected.length >= 2 && metric ? `${projectPath(projectId)}/runs/compare?${query}` : null, scope, 5000, value => value.runs.some(run => run.status === 'RUNNING'));
   if (selected.length < 2) return <Empty title="비교할 Run을 선택하세요"><p>실험 기록에서 2~4개 Run을 선택해 주세요.</p><a href={`#/projects/${projectId}/runs`}>실험 기록으로 →</a></Empty>;
   if (!metric) return <Empty title="비교할 지표가 없습니다"><p>선택한 실험에 숫자 지표를 기록하면 비교할 수 있습니다.</p></Empty>;
   const data = result.data;

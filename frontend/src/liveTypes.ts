@@ -5,7 +5,7 @@ export type ConnectionStatus = 'WAITING' | 'CONNECTED' | 'DISCONNECTED' | 'INACT
 export type LiveRun = { runId: string; projectId: string; name: string; status: Status; connectionStatus?: ConnectionStatus; metadata: Record<string, string>; startedAt: string; endedAt: string | null; error: string | null; lastHeartbeatAt: string | null };
 export type Point = { id: string; key?: string; value: number; step: string | number | null; epoch: number | null; elapsedTime: number | null; recordedAt: string };
 export type Summary = { runId: string; lastStep: string | number | null; metrics: Point[] };
-export type RunData = { items: LiveRun[]; total: number; counts: Record<Status, number>; summaries: Record<string, Summary>; metrics: string[] };
+export type RunData = { items: LiveRun[]; total: number; matched: number; page: number; totalPages: number; counts: Record<Status, number>; summaries: Record<string, Summary>; metrics: string[]; attention: LiveRun[] };
 export type Comparison = { metricKey: string; baselineRunId: string; commonStep: string | number | null; availableMetrics: string[];
   runs: { runId: string; name: string; status: Status; lastStep: string | number | null; latestMetric: Point | null; commonStepMetric: Point | null; deltaFromBaseline: number | null; series: { points: Point[]; sampled: boolean; totalPoints: number } }[];
   parameters: { key: string; values: (string | null)[]; different: boolean }[] };

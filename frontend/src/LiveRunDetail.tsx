@@ -11,7 +11,7 @@ const tabs = [['metrics','Metrics'],['parameters','Parameters'],['logs','Logs'],
 type ParametersResponse = { parameters: { key: string; value: string }[] };
 export default function LiveRunDetail({ projectId, runId, tab, scope, compare, owner }: { projectId: string; runId: string; tab: string; scope: string; compare: () => void; owner: boolean }) {
   const path = `${projectPath(projectId)}/runs/${encodeURIComponent(runId)}`;
-  const run = useApi<LiveRun>(path, scope, 5000);
+  const run = useApi<LiveRun>(path, scope, 5000, value => value.status === 'RUNNING');
   const parameters = useApi<ParametersResponse>(tab === 'parameters' ? `${path}/records?limit=1` : null, scope);
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>();
   const [stopOpen, setStopOpen] = useState(false), [stopBusy, setStopBusy] = useState(false), [stopError, setStopError] = useState<unknown>();

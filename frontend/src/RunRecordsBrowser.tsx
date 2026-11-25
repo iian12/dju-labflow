@@ -1,30 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle.tsx';
+import { useData } from './useData.ts';
 import { readRecordsApi, recordKind, recordKinds, recordNavigation, recordPageUrl, RecordReadError } from './runRecordsApi.ts';
 import type { ListPage, RecordItem, RecordKind, RecordLocation, RecordPage, SavedProject, SavedRun } from './runRecordsApi.ts';
 import './records.css';
 
-function useRead<T>(key: string, loader: (signal: AbortSignal) => Promise<T>, interval = 0) {
-  const [version, setVersion] = useState(0);
-  const [state, setState] = useState<{ key: string; data?: T; error?: unknown; loading: boolean }>({ key, loading: true });
-  useEffect(() => {
-    const controller = new AbortController();
-    let busy = false;
-    async function load() {
-      if (busy) return;
-      busy = true;
-      try {
-        const data = await loader(controller.signal);
-        if (!controller.signal.aborted) setState({ key, data, loading: false });
-      } catch (error) {
-        if (!controller.signal.aborted) setState(previous => ({ key, data: previous.key === key ? previous.data : undefined, loading: false, error }));
-      } finally { busy = false; }
-    }
-    void load();
-    const timer = interval ? setInterval(() => { if (!document.hidden) void load(); }, interval) : undefined;
-    return () => { controller.abort(); if (timer) clearInterval(timer); };
-  }, [key, loader, interval, version]);
-  return { ...(state.key === key ? state : { key, loading: true, data: undefined, error: undefined }), refresh: () => setVersion(value => value + 1) };
+function useRead<T>(key: string, loader: (signal: AbortSignal) => Promise<T>, interval = 0, pollWhile?: (data: T) => boolean) {
+  return useData(key, loader, interval, pollWhile);
 }
 
 const route = (project: string, run = '', kind: RecordKind = 'metrics') => `#/records/${encodeURIComponent(project)}${run ? `/${encodeURIComponent(run)}/${kind}` : ''}`;
@@ -70,17 +52,18 @@ export function RecordViewer({ projectId, runId, kind, embedded = false }: { pro
   const [jumpVersion, setJumpVersion] = useState(0);
   const runPath = `/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`;
   const loadRun = useCallback((signal: AbortSignal) => readRecordsApi<SavedRun>(runPath, signal), [runPath]);
-  const run = useRead(runPath, loadRun, position.direction === 'latest' ? 5000 : 0);
+  const run = useRead(runPath, loadRun, position.direction === 'latest' ? 5000 : 0, value => value.status === 'RUNNING');
+  const ended = run.data && run.data.status !== 'RUNNING';
   const path = recordPageUrl(projectId, runId, kind, position);
   const loadPage = useCallback((signal: AbortSignal) => readRecordsApi<RecordPage>(path, signal), [path]);
-  // Historical pages stay still. Latest keeps polling even after completion to catch the final records.
-  const page = useRead(path, loadPage, position.direction === 'latest' ? 5000 : 0);
+  // Historical pages stay still. Switching to a terminal run performs one final read, then stops polling.
+  const page = useRead(path, loadPage, position.direction === 'latest' && !ended ? 5000 : 0);
   const data = page.data;
   const navigation = data ? recordNavigation(data, position) : { older: false, newer: false };
   const retry = () => { run.refresh(); page.refresh(); };
   return <>{!embedded && <><a className="back" href={route(projectId)}>← 실험 목록</a><div className="page-heading run-heading"><div><div className="run-name"><h2>{run.data?.name ?? '실험 기록'}</h2>{run.data && <span className={`badge ${run.data.status}`}>{run.data.status}</span>}</div><p>{runId} · 시작 {date(run.data?.startedAt)}</p></div><button onClick={retry}>새로고침</button></div>{run.data?.error && <div className="record-error" role="alert">{run.data.error}</div>}</>}
     {!embedded && <nav className="tabs" aria-label="기록 종류">{recordKinds.map(value => <a key={value.id} href={route(projectId, runId, value.id)} className={kind === value.id ? 'active' : ''} aria-current={kind === value.id ? 'page' : undefined}>{value.label}</a>)}</nav>}
-    <div className="record-controls"><div><strong>{position.direction === 'latest' ? '최신 기록' : '이전 기록 탐색'}</strong><small>{position.direction === 'latest' ? '5초마다 갱신' : '과거 기록을 보는 동안 자동 갱신을 멈춥니다.'} · 한 번에 최대 200개, 기록 시각 순</small></div><div><button disabled={page.loading || !navigation.older} onClick={() => setPosition({ direction: 'before', cursor: data?.beforeCursor ?? undefined })}>이전 기록</button><button disabled={page.loading || !navigation.newer} onClick={() => setPosition({ direction: 'after', cursor: data?.afterCursor ?? undefined })}>다음 기록</button><button className="primary" onClick={() => { setPosition({ direction: 'latest' }); setJumpVersion(value => value + 1); page.refresh(); }}>최신 기록 보기</button></div></div>
+    <div className="record-controls"><div><strong>{position.direction === 'latest' ? '최신 기록' : '이전 기록 탐색'}</strong><small>{position.direction === 'latest' ? (ended ? '종료된 실험 · 자동 갱신 중지' : '5초마다 갱신') : '과거 기록을 보는 동안 자동 갱신을 멈춥니다.'} · 한 번에 최대 200개, 기록 시각 순</small></div><div><button disabled={page.loading || !navigation.older} onClick={() => setPosition({ direction: 'before', cursor: data?.beforeCursor ?? undefined })}>이전 기록</button><button disabled={page.loading || !navigation.newer} onClick={() => setPosition({ direction: 'after', cursor: data?.afterCursor ?? undefined })}>다음 기록</button><button className="primary" onClick={() => { setPosition({ direction: 'latest' }); setJumpVersion(value => value + 1); page.refresh(); }}>최신 기록 보기</button></div></div>
     <ReadError error={run.error ?? page.error} retry={retry} />
     {page.loading && <p className="record-empty" role="status">기록을 불러오는 중…</p>}
     {data && <><p className="record-range" role="status">{data.items.length}개 기록{data.items.length > 0 && ` · ${date(data.items[0].recordedAt)} ~ ${date(data.items.at(-1)?.recordedAt)}`}</p>{kind === 'logs' && <div className="record-log-filter"><label>로그 검색<input value={search} onChange={event => setSearch(event.target.value)} placeholder="현재 페이지에서 메시지 검색" /></label><label>로그 레벨<select aria-label="로그 레벨" value={level} onChange={event => setLevel(event.target.value)}>{['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'].map(value => <option key={value}>{value}</option>)}</select></label><label>로그 출처<select aria-label="로그 출처" value={source} onChange={event => setSource(event.target.value)}>{['ALL', 'USER', 'SDK', 'STDOUT', 'STDERR'].map(value => <option key={value}>{value}</option>)}</select></label></div>}{!data.items.length ? <section className="panel record-empty">조회할 기록이 없습니다.</section> : <RecordRows kind={kind} followLatest={position.direction === 'latest'} jumpVersion={jumpVersion} items={kind === 'logs' ? data.items.filter(item => (source === 'ALL' || item.source === source) && (level === 'ALL' || item.level === level) && item.message?.toLowerCase().includes(search.toLowerCase())) : data.items} />}</>}

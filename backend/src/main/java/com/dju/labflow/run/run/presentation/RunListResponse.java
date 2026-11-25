@@ -12,7 +12,9 @@ public record RunListResponse(
         int size,
         long totalElements,
         long totalPages,
-        Map<String, Long> counts) {
+        Map<String, Long> counts,
+        long projectTotal,
+        List<String> availableMetrics) {
     public static RunListResponse from(RunPage page, RunHeartbeatPolicy heartbeats) {
         return new RunListResponse(
                 page.items().stream()
@@ -28,6 +30,8 @@ public record RunListResponse(
                         "COMPLETED",
                         page.completed(),
                         "FAILED",
-                        page.failed()));
+                        page.failed()),
+                page.projectTotal(),
+                page.availableMetrics());
     }
 }

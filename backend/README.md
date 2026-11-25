@@ -156,6 +156,10 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 
 ### Studio 전체 API 연결
 
+Run 목록은 `page`(0부터), `size`(1~100), `search`(이름의 부분 문자열, 최대 100자), `status`(쉼표로 구분한 상태), `sort`(`recent`, `high`, `low`, `duration`), `metricKey`, `runIds`(서로 다른 ID 최대 100개)를 지원합니다. 검색·필터 후 DB에서 정렬하고 한 페이지만 반환합니다. 지표 정렬은 `metricKey`가 필수이며 시각/ID 기준 최신 값을 사용하고 미기록 Run은 뒤에 둡니다. `duration`은 진행 중이면 서버 현재 시각까지의 시간을 사용합니다. 동률은 시작 시각/ID 내림차순입니다. `totalElements`는 검색 결과 수, `projectTotal`과 `counts`는 프로젝트 전체 집계, `availableMetrics`는 프로젝트 전체 지표 이름입니다. Studio는 페이지당 20개 및 그 요약만 조회하며 페이지 간 비교 선택을 유지합니다. 개요의 확인할 실험은 별도 상태 필터로 최대 3개를 조회합니다. 기존 MariaDB에는 `database/run-list-metric-index.sql`을 한 번 적용합니다. 새 DB는 `database/runs.sql`에 인덱스가 포함되어 있습니다.
+
+종료된 실험과 비교는 폴링을 중지하며 상세·설정 화면은 Run 목록/요약을 주기적으로 읽지 않습니다.
+
 `frontend`는 세션, 프로젝트 CRUD, Run 목록·개요·비교·상세, 기록 커서 탐색, API 키 발급·목록·폐기와 기록 내보내기를 실제 API로 처리합니다. 빈 데이터나 서버 오류를 샘플 데이터로 대체하지 않습니다. 최신 프런트에는 여기 추가한 API가 필요하므로 백엔드를 다시 빌드/실행합니다.
 
 `GET /api/v1/auth/me`는 현재 사용자만 반환하고 쿠키를 JSON에 노출하지 않습니다. 만료된 access 쿠키는 공통 프런트 API 클라이언트가 CSRF/refresh로 한 번 갱신합니다. 키 관리 API는 PUBLIC 프로젝트여도 소유자만 사용할 수 있고 원문/해시는 목록에 포함하지 않습니다. 폐기는 프로젝트 잠금과 기존 키 버전 검사를 적용하며 폐기한 키의 SDK 요청은 거부합니다. 키 목록은 0 기반 페이지, size 1~100입니다.

@@ -4,12 +4,16 @@ import com.dju.labflow.global.resolver.CurrentUserId;
 import com.dju.labflow.project.project.domain.ProjectId;
 import com.dju.labflow.run.run.application.*;
 import com.dju.labflow.run.run.domain.RecordKind;
+import com.dju.labflow.run.run.domain.Run;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.run.run.domain.RunSearch;
+import com.dju.labflow.run.run.domain.RunStatus;
 import com.dju.labflow.user.domain.UserId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.*;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,9 +36,20 @@ public class RunQueryController {
             @Parameter(hidden = true) @CurrentUserId(required = false) @Nullable UserId user,
             @PathVariable @Positive Long projectId,
             @RequestParam(defaultValue = "0") @PositiveOrZero int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(defaultValue = "") @Size(max = 100) String search,
+            @RequestParam(required = false) List<RunStatus> status,
+            @RequestParam(defaultValue = "recent") String sort,
+            @RequestParam(defaultValue = "") @Size(max = 100) String metricKey,
+            @RequestParam(required = false) List<Long> runIds) {
         return RunListResponse.from(
-                service.list(user, ProjectId.of(projectId), new RunListQuery(page, size)),
+                service.list(
+                        user,
+                        ProjectId.of(projectId),
+                        new RunListQuery(
+                                page,
+                                size,
+                                new RunSearch(search, status, sort, metricKey, runIds))),
                 heartbeats);
     }
 
@@ -44,7 +59,7 @@ public class RunQueryController {
             @Parameter(hidden = true) @CurrentUserId(required = false) @Nullable UserId user,
             @PathVariable @Positive Long projectId,
             @PathVariable @Positive Long runId) {
-        var run = service.get(user, ProjectId.of(projectId), RunId.of(runId));
+        Run run = service.get(user, ProjectId.of(projectId), RunId.of(runId));
         return RunQueryResponse.from(run, heartbeats.status(run));
     }
 

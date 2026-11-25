@@ -22,7 +22,12 @@ test('workspace uses API data for list, dynamic metrics, comparisons and session
     if(url.pathname.endsWith('/auth/refresh')) return route.fulfill({status:401,json:{}});
     if(url.pathname==='/api/v1/projects') return route.fulfill({json:{items:[saved],page:0,size:100,totalPages:1,totalElements:1}});
     if(url.pathname.endsWith(`/projects/${project}`)) return route.fulfill({json:saved});
-    if(url.pathname.endsWith('/runs')) return route.fulfill({json:{items:runs,page:0,size:100,totalPages:1,totalElements:2,counts:{COMPLETED:2,RUNNING:0,FAILED:0}}});
+    if(url.pathname.endsWith('/runs')) {
+      const search=url.searchParams.get('search')??'';
+      const ids=url.searchParams.get('runIds')?.split(',');
+      const items=runs.filter(run=>run.name.includes(search)&&(!ids||ids.includes(run.runId)));
+      return route.fulfill({json:{items,page:0,size:20,totalPages:1,totalElements:items.length,projectTotal:2,availableMetrics:['validation_score'],counts:{COMPLETED:2,RUNNING:0,FAILED:0}}});
+    }
     if(url.pathname.endsWith('/summaries')) return route.fulfill({json:runs.map((run,index)=>({runId:run.runId,lastStep:10,metrics:[point(index?.7:.8)]}))});
     if(url.pathname.endsWith('/metric-series')) return route.fulfill({json:{latestMetric:point(.8),series:{points:[point(.5,0),point(.8)],sampled:false,totalPoints:2}}});
     if(url.pathname.endsWith('/compare')) {
@@ -42,8 +47,10 @@ test('workspace uses API data for list, dynamic metrics, comparisons and session
     await page.getByRole('link',{name:'recorded-baseline',exact:true}).waitFor();
     assert.equal(await page.getByLabel('표시 지표',{exact:true}).inputValue(),'validation_score');
     await page.getByLabel('Run 검색').fill('candidate');
+    await page.waitForFunction(()=>document.querySelectorAll('tbody tr').length===1);
     assert.equal(await page.locator('tbody tr').count(),1);
     await page.getByLabel('Run 검색').fill('');
+    await page.getByLabel('recorded-baseline 선택',{exact:true}).waitFor();
     await page.getByLabel('recorded-baseline 선택',{exact:true}).check();
     await page.getByLabel('recorded-candidate 선택',{exact:true}).check();
     await page.getByRole('button',{name:'결과 비교 →'}).click();

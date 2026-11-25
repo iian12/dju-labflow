@@ -12,6 +12,7 @@ import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.run.systemmetric.domain.repository.RunSystemMetricRepository;
 import com.dju.labflow.run.text.domain.repository.RunTextRepository;
 import com.dju.labflow.user.domain.UserId;
+import java.util.List;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
@@ -55,7 +56,7 @@ public class RunQueryService {
     public RunPage list(@Nullable UserId user, ProjectId projectId, RunListQuery query) {
         validator.validate(query);
         projects.get(user, projectId);
-        return runs.findPageByProjectId(projectId, query.page(), query.size());
+        return runs.findPageByProjectId(projectId, query.page(), query.size(), query.search());
     }
 
     public Run get(@Nullable UserId user, ProjectId projectId, RunId runId) {
@@ -73,7 +74,7 @@ public class RunQueryService {
             @Nullable UserId user, ProjectId projectId, RunId runId, int limit, boolean latest) {
         RunValidation.limit(limit);
         get(user, projectId, runId);
-        var query = new RecordPageQuery(limit, null, true);
+        RecordPageQuery query = new RecordPageQuery(limit, null, true);
         return new RunRecords(
                 parameters.findByRunId(runId),
                 latest ? metrics.findPage(runId, query).items() : metrics.findByRunId(runId, limit),
@@ -96,8 +97,8 @@ public class RunQueryService {
         if ((before != null && after != null) || (latest && (before != null || after != null)))
             throw new IllegalArgumentException("Use one of latest, before, or after");
         String cursor = before != null ? before : after;
-        var position = cursor == null ? null : cursors.decode(cursor, runId, kind);
-        var query = new RecordPageQuery(limit, position, latest || before != null);
+        RecordPosition position = cursor == null ? null : cursors.decode(cursor, runId, kind);
+        RecordPageQuery query = new RecordPageQuery(limit, position, latest || before != null);
         return switch (kind) {
             case METRICS ->
                     page(
@@ -136,7 +137,7 @@ public class RunQueryService {
             RecordSlice<T> slice,
             RecordPageQuery query,
             Function<T, RecordPosition> position) {
-        var items = slice.items();
+        List<T> items = slice.items();
         String before =
                 items.isEmpty()
                         ? null
