@@ -54,6 +54,32 @@ Major API and bounded k6 verification (keep test credentials out of Git):
   Results and HTML report: .external-access/load-tests/<cycle>/
   The runner deletes its temporary project/user and private execution context.
 
+First endurance test (same fixture and functional preparation as above):
+  .\scripts\monitoring\run-cycle.ps1 -Profile soak
+  Windows sleep is prevented only while this wrapper is running.
+  10-minute ramp to 10 VUs, 100-minute hold, 1-second ramp-down and 599-second
+  recovery observation: 2 hours total, plus setup and final verification.
+  The soak-check profile compresses this workflow to about one minute for
+  validating the harness, including actual session rotation every 15 seconds.
+  A shared test session rotates every five minutes in soak mode. VUs obtain
+  the latest cookie through a token-protected loopback relay on port 6567.
+  Relay requests are excluded from application latency/error/request totals.
+  The supervisor uses a separate SSH forward to the Pi gateway on loopback
+  15174 for preparation, token rotation and cleanup. k6 load remains on public
+  HTTPS. External/direct health probes are archived every 30 seconds. Failed
+  response samples retain status, timing, Cloudflare Ray and parsed 1xxx code;
+  they do not retain headers containing credentials or response-body text.
+  If account cleanup fails, ignored fixture credentials remain for recovery.
+  The supervisor uses GET requests on k6's loopback control API at 127.0.0.1:6565.
+  status.json and monitor.ndjson contain live counts and server samples;
+  k6-raw.ndjson.gz streams compressed raw data directly to disk.
+  The final report includes warmup/steady/recovery bands and 5-minute windows.
+  Stops: temperature >=80 C, Pi available RAM <200 MiB, NVMe free <5 GiB,
+  PC recording disk free <2 GiB, three consecutive monitoring/session failures,
+  or active run deadline. The soak profile records transient HTTP failures for
+  the full observation window; its unchanged error-rate threshold is evaluated
+  at the end. Smoke/soak-check still abort on the error-rate threshold.
+
 API-key authentication regression against MariaDB:
   Use a disposable local MariaDB 11.8 database named labflow_auth_test, published
   only on 127.0.0.1:33070. Start it with --innodb-snapshot-isolation=ON and
