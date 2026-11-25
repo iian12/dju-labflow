@@ -1,3 +1,5 @@
+-- Legacy pre-Flyway repair reference only. New installs use db/migration/V1__initial_schema.sql.
+-- After Flyway adoption, add a new versioned migration instead. See database/README.md.
 -- Run MVP: 기존 사용자/프로젝트 스키마가 준비된 MariaDB에서 적용한다.
 -- 자동 실행되지 않는다. Hibernate validate를 사용하기 전에 적용한다.
 CREATE TABLE IF NOT EXISTS run_entity (

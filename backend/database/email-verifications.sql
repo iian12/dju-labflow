@@ -1,3 +1,5 @@
+-- Legacy pre-Flyway repair reference only. New installs use db/migration/V1__initial_schema.sql.
+-- After Flyway adoption, add a new versioned migration instead. See database/README.md.
 -- 기존 MariaDB에 배포 전 적용하는 신규 테이블. 자동 실행되지 않는다.
 CREATE TABLE email_verifications (
     user_id BIGINT NOT NULL,

@@ -34,6 +34,7 @@ class EnvironmentConfigurationTests {
                 CORS_ALLOWED_ORIGINS=http://localhost:5173,https://frontend.example.test
                 JWT_COOKIE_SECURE=false
                 JWT_COOKIE_SAME_SITE=Lax
+                JPA_DDL_AUTO=none
                 """);
         runner(dotenv)
                 .run(
@@ -52,6 +53,10 @@ class EnvironmentConfigurationTests {
                                             context.getEnvironment()
                                                     .getProperty("spring.datasource.url"))
                                     .isEqualTo("jdbc:mariadb://test-host:3306/testdb");
+                            assertThat(
+                                            context.getEnvironment()
+                                                    .getProperty("spring.jpa.hibernate.ddl-auto"))
+                                    .isEqualTo("none");
                         });
     }
 
@@ -66,6 +71,7 @@ class EnvironmentConfigurationTests {
                 DB_PASSWORD=test-password
                 JWT_SECRET_KEY=dotenv-test-only-key-at-least-32-bytes
                 CORS_ALLOWED_ORIGINS=https://frontend.example.test
+                JPA_DDL_AUTO=update
                 """);
         runner(dotenv)
                 .run(
@@ -79,6 +85,22 @@ class EnvironmentConfigurationTests {
                                                             "springdoc.api-docs.enabled",
                                                             Boolean.class))
                                     .isFalse();
+                            assertThat(
+                                            context.getEnvironment()
+                                                    .getProperty("spring.jpa.hibernate.ddl-auto"))
+                                    .isEqualTo("validate");
+                            assertThat(
+                                            context.getEnvironment()
+                                                    .getProperty(
+                                                            "spring.flyway.baseline-on-migrate",
+                                                            Boolean.class))
+                                    .isFalse();
+                            assertThat(
+                                            context.getEnvironment()
+                                                    .getProperty(
+                                                            "spring.flyway.clean-disabled",
+                                                            Boolean.class))
+                                    .isTrue();
                         });
     }
 

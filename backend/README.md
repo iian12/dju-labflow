@@ -2,13 +2,15 @@
 
 Java 21 / Spring Boot 4.1 기반 백엔드입니다. 도메인과 JPA 엔티티를 분리하고 서비스에서 트랜잭션을 관리합니다.
 
+현재 DB 기준은 Flyway의 `V1__initial_schema.sql`입니다. 새 DB는 자동 생성하고, 기존 DB는 구조 검사 후 명시적으로 편입합니다. 전체 16개 테이블, 전환 명령 및 운영 절차는 [DB 스키마 관리](database/README.md)를 참고하세요. 이 문서의 과거 개별 SQL은 최초 편입 전 누락 사항 보정용으로만 남겨 두었습니다.
+
 ## 검증
 
 ```powershell
 .\gradlew.bat build
 ```
 
-테스트는 `test` 프로필의 메모리 H2를 사용하므로 별도 MariaDB가 필요하지 않습니다. 운영 DB 설정은 변경하지 않습니다. H2 회귀 테스트는 인증, MVC, 영속성 변경을 확인하며 MariaDB 고유의 잠금/동시성 동작까지 보장하지는 않습니다.
+기본 회귀 테스트는 `test` 프로필의 메모리 H2를 사용하므로 별도 MariaDB가 필요하지 않습니다. `LABFLOW_MARIADB_BIN`을 지정한 선택 검사는 별도 임시 MariaDB 프로세스로 실제 마이그레이션과 JPA 검증을 수행합니다. 운영 DB 설정은 변경하지 않습니다. H2 회귀 테스트는 인증, MVC, 영속성 변경을 확인하며 MariaDB 고유의 잠금/동시성 동작까지 보장하지는 않습니다.
 
 ## Java 코드 포맷
 
@@ -120,7 +122,7 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 
 상세/목록 항목에는 `projectId`, `name`, `description`, `createdBy`, `visibility`, `createdAt`, `updatedAt`, `version`이 있습니다. 수정은 상세에서 받은 version과 함께 `{"name":"renamed","description":null,"visibility":"PUBLIC","version":0}`을 PUT으로 전송합니다. 수정 후에는 최신 상세를 다시 조회합니다. 삭제도 같은 조회 버전을 `?version=0`으로 보내며 오래된 수정·삭제 요청은 `409 STALE_STATE`입니다. 소유 관계와 생성 시각은 변경되지 않습니다.
 
-삭제는 소유자·버전 확인 후 프로젝트 키, Run, 파라미터·메트릭·로그·텍스트·시스템/GPU 지표·Run 메타데이터를 한 트랜잭션에서 영구 제거합니다. 중간 실패 시 모두 롤백합니다. 프로젝트 행 잠금은 키 발급, Run 생성, Run 상태 변경 및 기록 추가와 공유하여 삭제와 동시에 고아 데이터가 생기지 않도록 합니다. 기존 키로 진행 중인 요청도 삭제 후 새 Run/기록을 생성할 수 없습니다. 반복 삭제는 404입니다. DB 스키마에 추가 컬럼은 없으며 기존 `database/runs.sql`의 테이블이 준비되어 있어야 합니다.
+삭제는 소유자·버전 확인 후 프로젝트 키, Run, 파라미터·메트릭·로그·텍스트·시스템/GPU 지표·Run 메타데이터를 한 트랜잭션에서 영구 제거합니다. 중간 실패 시 모두 롤백합니다. 프로젝트 행 잠금은 키 발급, Run 생성, Run 상태 변경 및 기록 추가와 공유하여 삭제와 동시에 고아 데이터가 생기지 않도록 합니다. 기존 키로 진행 중인 요청도 삭제 후 새 Run/기록을 생성할 수 없습니다. 반복 삭제는 404입니다. 이 삭제 API에 필요한 테이블은 Flyway V1에 포함되어 있습니다.
 
 `ProjectHttpTests`는 실제 JWT·CSRF·보안 필터와 H2에서 CRUD, 공개 범위, 개인 목록, 소유자 권한, 클라이언트 버전 충돌, 종속 데이터 삭제·롤백·동시성을 확인합니다. 테스트 프로필은 로컬 Gmail 설정과 분리하여 외부 메일을 발송하지 않습니다.
 
@@ -156,7 +158,7 @@ Invoke-RestMethod -Method Post -Uri "$authUrl/logout" -WebSession $labflowSessio
 
 ### Studio 전체 API 연결
 
-Run 목록은 `page`(0부터), `size`(1~100), `search`(이름의 부분 문자열, 최대 100자), `status`(쉼표로 구분한 상태), `sort`(`recent`, `high`, `low`, `duration`), `metricKey`, `runIds`(서로 다른 ID 최대 100개)를 지원합니다. 검색·필터 후 DB에서 정렬하고 한 페이지만 반환합니다. 지표 정렬은 `metricKey`가 필수이며 시각/ID 기준 최신 값을 사용하고 미기록 Run은 뒤에 둡니다. `duration`은 진행 중이면 서버 현재 시각까지의 시간을 사용합니다. 동률은 시작 시각/ID 내림차순입니다. `totalElements`는 검색 결과 수, `projectTotal`과 `counts`는 프로젝트 전체 집계, `availableMetrics`는 프로젝트 전체 지표 이름입니다. Studio는 페이지당 20개 및 그 요약만 조회하며 페이지 간 비교 선택을 유지합니다. 개요의 확인할 실험은 별도 상태 필터로 최대 3개를 조회합니다. 기존 MariaDB에는 `database/run-list-metric-index.sql`을 한 번 적용합니다. 새 DB는 `database/runs.sql`에 인덱스가 포함되어 있습니다.
+Run 목록은 `page`(0부터), `size`(1~100), `search`(이름의 부분 문자열, 최대 100자), `status`(쉼표로 구분한 상태), `sort`(`recent`, `high`, `low`, `duration`), `metricKey`, `runIds`(서로 다른 ID 최대 100개)를 지원합니다. 검색·필터 후 DB에서 정렬하고 한 페이지만 반환합니다. 지표 정렬은 `metricKey`가 필수이며 시각/ID 기준 최신 값을 사용하고 미기록 Run은 뒤에 둡니다. `duration`은 진행 중이면 서버 현재 시각까지의 시간을 사용합니다. 동률은 시작 시각/ID 내림차순입니다. `totalElements`는 검색 결과 수, `projectTotal`과 `counts`는 프로젝트 전체 집계, `availableMetrics`는 프로젝트 전체 지표 이름입니다. Studio는 페이지당 20개 및 그 요약만 조회하며 페이지 간 비교 선택을 유지합니다. 개요의 확인할 실험은 별도 상태 필터로 최대 3개를 조회합니다. 이 인덱스는 Flyway V1에 포함됩니다. 기존 DB 최초 편입 시 누락되었다면 `database/run-list-metric-index.sql`을 검토해 보정한 뒤 구조 검사를 통과해야 합니다.
 
 프런트는 같은 출처의 탭 간 Web Locks(미지원 시 IndexedDB 임대)로 refresh·로그인·로그아웃을 직렬화합니다. 잠금을 얻은 뒤 `/auth/me`로 다른 탭의 갱신 여부를 확인하고 불필요한 회전을 생략합니다. BroadcastChannel/storage 이벤트로 세션 변경을 전달하고 이전 사용자의 화면과 진행 요청을 정리합니다. 종료된 실험과 비교는 폴링을 중지하며 상세·설정 화면은 Run 목록/요약을 주기적으로 읽지 않습니다.
 
@@ -234,7 +236,7 @@ Invoke-RestMethod -Method Get -Uri "$sdkUrl/$($run.runId)" -Headers $sdkHeaders
 4. `POST /api/v1/auth/email-verifications/verify`에 `{"email":"user@example.com","code":"A2B3C4"}`를 보냅니다. 성공하면 계정이 ACTIVE로 바뀝니다. 자동 로그인하지 않습니다.
 5. 미수신 시 `POST /api/v1/auth/email-verifications/resend`에 `{"email":"user@example.com"}`를 보냅니다. 이 요청에도 CSRF가 필요합니다.
 
-코드는 10분간 유효하고 대소문자를 구분하지 않으며 앞뒤 공백을 제거합니다. 실패 5회 후 잠기며, 재발송하면 이전 코드는 무효화됩니다. 재발송은 60초 간격이고 최초 발송을 포함해 계정당 시간당 5회로 제한합니다. 가입/재발송은 IP당 시간당 합계 10회, 검증은 100회입니다. 로그인은 IP당 분당 60회와 정규화한 이메일/IP 조합당 15분에 10회를 함께 적용합니다. 성공·실패 모두 요청 횟수에 포함하며 계정 자체를 전역 잠그지 않습니다. 로그인 한도는 양수 `LOGIN_IP_LIMIT`, `LOGIN_ACCOUNT_IP_LIMIT`로 변경합니다. 모든 IP 제한은 DB의 고정 시간 구간 카운터를 원자적으로 증가시켜 재시작·여러 서버 인스턴스에서도 공유합니다. 시간 구간 경계에서는 다음 구간 한도를 새로 사용할 수 있습니다. DB에는 IP/이메일 원문 대신 SHA-256 키·만료 시각·횟수만 저장하며 만료 행은 요청 시 최대 분당 한 번 정리합니다. 기존 DB에는 배포 전에 `database/auth-request-limits.sql`을 적용합니다.
+코드는 10분간 유효하고 대소문자를 구분하지 않으며 앞뒤 공백을 제거합니다. 실패 5회 후 잠기며, 재발송하면 이전 코드는 무효화됩니다. 재발송은 60초 간격이고 최초 발송을 포함해 계정당 시간당 5회로 제한합니다. 가입/재발송은 IP당 시간당 합계 10회, 검증은 100회입니다. 로그인은 IP당 분당 60회와 정규화한 이메일/IP 조합당 15분에 10회를 함께 적용합니다. 성공·실패 모두 요청 횟수에 포함하며 계정 자체를 전역 잠그지 않습니다. 로그인 한도는 양수 `LOGIN_IP_LIMIT`, `LOGIN_ACCOUNT_IP_LIMIT`로 변경합니다. 모든 IP 제한은 DB의 고정 시간 구간 카운터를 원자적으로 증가시켜 재시작·여러 서버 인스턴스에서도 공유합니다. 시간 구간 경계에서는 다음 구간 한도를 새로 사용할 수 있습니다. DB에는 IP/이메일 원문 대신 SHA-256 키·만료 시각·횟수만 저장하며 만료 행은 요청 시 최대 분당 한 번 정리합니다. 테이블은 Flyway V1에 포함됩니다. 기존 DB 최초 편입 시 누락되었다면 `database/auth-request-limits.sql`을 검토해 보정합니다.
 
 `TRUSTED_PROXY_CIDRS`는 즉시 연결하는 신뢰 프록시의 CIDR 목록이며 기본값은 `127.0.0.1/32,::1/128`, 빈 값은 헤더 신뢰 안 함입니다. 비신뢰 주소의 `X-Forwarded-For`는 무시하고 신뢰 프록시 체인은 오른쪽부터 첫 비신뢰 IP까지 확인합니다. 호스트 이름은 허용하지 않으며 잘못된/과도한 헤더는 소켓 주소로 처리합니다. 광범위한 네트워크를 신뢰 목록에 넣지 마세요. Servlet의 자동 forwarded 주소 변경은 꺼 두어 이 검증보다 먼저 원격 주소가 바뀌지 않게 합니다.
 
@@ -246,7 +248,7 @@ Invoke-RestMethod -Method Get -Uri "$sdkUrl/$($run.runId)" -Headers $sdkHeaders
 
 사용자와 코드 HMAC은 같은 트랜잭션에 저장하며 메일은 커밋 후 발송합니다. 현재 발송은 요청 스레드에서 수행되며 SMTP 타임아웃은 각각 5초입니다. 발송 실패 시 사용자가 재발송해야 합니다. 메모리 이벤트이므로 커밋 직후 서버가 종료되면 메일이 유실될 수 있으며, 자동 재시도/전달 보장이 필요하면 영속 발송 큐를 추가해야 합니다. 인증 코드는 로그와 API 응답에 포함하지 않습니다.
 
-기존 DB에는 `database/email-verifications.sql`의 테이블을 먼저 적용해야 합니다. 이 스크립트는 자동 실행되지 않습니다. 테스트에서는 H2가 테이블을 생성합니다.
+테이블은 Flyway V1에 포함됩니다. 기존 DB 최초 편입 시 누락되었다면 `database/email-verifications.sql`을 검토해 보정합니다. 일반 회귀 테스트에서는 H2가 테이블을 생성합니다.
 
 이메일 인증 코드는 다음 계층으로 구분합니다.
 
@@ -311,7 +313,7 @@ Copy-Item .env.example .env
 | `JWT_ACCESS_TOKEN_EXPIRATION`, `JWT_REFRESH_TOKEN_EXPIRATION` | 예: `15m`, `7d` |
 | `CORS_ALLOWED_ORIGINS` | 정확한 출처를 쉼표로 구분. 예: `https://app.example.com,https://admin.example.com` |
 | `JWT_COOKIE_SECURE`, `JWT_COOKIE_SAME_SITE` | 인증 및 CSRF 쿠키의 공통 정책 |
-| `JPA_DDL_AUTO` | 기본 `validate`. 스키마가 준비되어 있어야 실행 가능 |
+| `JPA_DDL_AUTO` | 로컬 기본 `validate`. 운영 프로필은 이 값과 무관하게 `validate` 고정 |
 | `API_DOCS_ENABLED` | Swagger/OpenAPI 노출 여부 |
 
 로컬 프로필은 `Secure=false`, Swagger 활성화를 기본으로 하고 운영 프로필은 `Secure=true`, Swagger 비활성화를 기본으로 합니다. `.env.prod.example`은 운영 설정 예시입니다. `SameSite=None`은 `Secure=true`일 때만 허용합니다. CORS는 자격 증명을 사용하므로 `*` 또는 경로가 있는 URL을 허용하지 않습니다.
@@ -330,7 +332,7 @@ Copy-Item .env.example .env
 - 프로젝트와 API 키는 조회한 버전을 도메인에 보존해 변경 전 비교하고, JPA `@Version`으로 실제 동시 쓰기도 검사합니다.
 - API 키는 발급 시 `lastUsedAt=null`입니다. 키와 계정 상태 검증을 통과한 인증에서만 사용 시각을 기록합니다. 전용 조건부 갱신은 활성 상태를 다시 확인하고 시간 역행을 막으며 버전도 증가시켜 오래된 객체의 덮어쓰기를 거부합니다. 사용 시각은 SDK 작업 완료 시각이 아니라 인증 성공 시각입니다.
 
-JPA 매핑은 스키마 정의이며 기존 DB를 자동 마이그레이션하지 않습니다. 새 로컬 DB의 초기 생성에 Hibernate를 사용할 경우 `.env`의 `JPA_DDL_AUTO=update`를 명시할 수 있습니다. 운영에서는 별도 DDL/마이그레이션으로 제약과 인덱스를 반영하고 `validate`를 유지하세요.
+스키마 변경은 `src/main/resources/db/migration`의 Flyway 버전 SQL로 관리합니다. 새 DB에는 완전한 V1을 적용하고, 기존 DB에는 `schemaCheck` 후 명시적 `schemaBaseline`이 필요합니다. JPA는 기본 `validate`이며 운영에서는 이를 고정합니다. 로컬 `update`는 버릴 수 있는 실험용 DB에서만 사용하고 공유 DB/배포에는 사용하지 않습니다. 적용된 V1은 수정하지 않고 다음 변경부터 V2 이상을 추가합니다. 상세 절차는 [DB 스키마 관리](database/README.md)에 정리했습니다.
 
 API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습니다. 컨트롤러가 HTTP 요청 DTO를 명령으로 변환합니다. 기존 `/api/project-api-keys/...` 경로는 제공하지 않으므로 클라이언트도 `/api/v1/project-api-keys/...`로 변경해야 합니다.
 
@@ -362,7 +364,7 @@ Python SDK의 로컬 보관 로그는 `POST .../runs/{runId}/logs`에 `X-Labflow
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
-`POST /api/v1/sdk/runs/{runId}/heartbeat`는 본문 없이 실행의 생존 시각을 서버 시계로 갱신합니다. 기존 프로젝트 접근 정책과 실행 잠금을 적용하며 종료된 실행에는 409를 반환합니다. SDK/웹 조회의 `lastHeartbeatAt`은 마지막 수신 시각이며 미수신 실행은 null입니다. 시간 역행으로 기존 생존 시각을 덮어쓰지 않습니다. 기존 MariaDB는 배포 전에 `database/run-heartbeat.sql`을 한 번 적용하고 새 DB는 갱신된 `database/runs.sql`을 사용합니다.
+`POST /api/v1/sdk/runs/{runId}/heartbeat`는 본문 없이 실행의 생존 시각을 서버 시계로 갱신합니다. 기존 프로젝트 접근 정책과 실행 잠금을 적용하며 종료된 실행에는 409를 반환합니다. SDK/웹 조회의 `lastHeartbeatAt`은 마지막 수신 시각이며 미수신 실행은 null입니다. 시간 역행으로 기존 생존 시각을 덮어쓰지 않습니다. 컬럼은 Flyway V1에 포함되며, 기존 DB 최초 편입 시 누락되었다면 `database/run-heartbeat.sql`을 검토해 보정합니다.
 
 SDK 상세와 웹 목록·상세는 실행 상태와 별도로 `connectionStatus`를 반환합니다. 서버 시각으로 마지막 Heartbeat부터 기본 2분 이상 경과하면 `DISCONNECTED`입니다. 첫 신호가 없으면 시작 시각을 기준으로 하며 그 전까지는 `WAITING`, 최근 신호가 있으면 `CONNECTED`, 종료한 실행은 `INACTIVE`입니다. `RUN_HEARTBEAT_TIMEOUT` 환경변수 또는 `labflow.runs.heartbeat.timeout` 설정으로 양수 Duration(`2m`, `120s` 등)을 지정합니다. 웹은 기존 5초 주기 조회로 표시를 갱신합니다.
 
@@ -374,13 +376,13 @@ SDK 상세와 웹 목록·상세는 실행 상태와 별도로 `connectionStatus
 
 중복 판정과 실제 쓰기는 같은 트랜잭션으로 저장되므로 프로세스 재시작/다중 서버에서도 DB에 성공 기록이 남고, 실패는 기록과 요청 ID를 함께 롤백합니다. 이미 종료된 Run에 대한 기존 성공 요청의 재전송은 허용하지만 새 요청의 기록 추가는 기존대로 거부합니다. 헤더 없는 클라이언트는 기존 동작을 유지하며 같은 내용도 새 기록이 됩니다. SDK 자동 재시도는 기본 0회이고 `max_retries`로 0~5회 설정할 수 있습니다. Heartbeat 재전송도 같은 ID면 시각을 다시 갱신하지 않으며 다음 주기의 신호는 새 ID를 사용합니다.
 
-기존 DB에는 `database/sdk-requests.sql`을 서버 배포 전에 적용합니다. 새 DB의 `database/runs.sql`에도 포함되어 있습니다. `sdk_request_entity`는 원문 본문/키 대신 요청 ID와 내용의 SHA-256 해시, 결과 Run ID와 생성 시각을 저장하고 `(project_id, request_key)` 유니크 제약을 둡니다. 성공한 쓰기마다 한 행이 추가되며 TTL 없이 프로젝트 삭제까지 유지합니다. 프로젝트 삭제 트랜잭션에서 함께 정리합니다. 이전 서버는 헤더를 무시하므로 서버를 먼저 배포한 후 SDK 재시도를 사용합니다.
+테이블은 Flyway V1에 포함되며, 기존 DB 최초 편입 시 누락되었다면 `database/sdk-requests.sql`을 검토해 보정합니다. `sdk_request_entity`는 원문 본문/키 대신 요청 ID와 내용의 SHA-256 해시, 결과 Run ID와 생성 시각을 저장하고 `(project_id, request_key)` 유니크 제약을 둡니다. 성공한 쓰기마다 한 행이 추가되며 TTL 없이 프로젝트 삭제까지 유지합니다. 프로젝트 삭제 트랜잭션에서 함께 정리합니다. 이전 서버는 헤더를 무시하므로 서버를 먼저 배포한 후 SDK 재시도를 사용합니다.
 
 요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK는 `sdk/src/labflow`에 구현되어 있으며 API key 설정, Run 생성, `params/metric/log/text`, 완료·실패 및 상태 조회를 제공합니다. SDK 0.2.0부터 환경 메타데이터, stdout/stderr, CPU/RAM·선택 NVIDIA GPU 지표와 주기 Heartbeat를 자동 수집합니다. 설치·사용법과 실제 HTTP 연결 테스트는 [SDK README](../sdk/README.md)를 참고하세요. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
 
-기존 DB에는 `database/runs.sql`을 먼저 적용해야 합니다. 이 DDL은 자동 실행되지 않으며 테스트에서는 H2가 새 테이블을 생성합니다. 실제 MariaDB 마이그레이션 실행은 별도 배포 단계에서 수행합니다.
+현재 신규 설치는 Flyway V1으로 전체 스키마를 생성합니다. `database/runs.sql`은 과거 Run 부분 DDL이며 신규 설치 기준으로 사용하지 않습니다. 기존 DB의 최초 편입 절차와 데이터 보존 검증은 [DB 스키마 관리](database/README.md)를 따릅니다.
 
-기존 `@Lob` 기본 매핑으로 생성한 MariaDB의 `run_text_entity.text`와 `run_log_entity.message`가 `TINYTEXT`라면 255바이트를 넘는 분류 보고서·로그가 저장되지 않습니다. 수정된 JPA 매핑은 배포 DDL과 동일하게 `LONGTEXT`를 명시합니다. 기존 DB는 `database/expand-run-text-columns.sql`로 두 열을 확장하며 기존 기록은 보존합니다. API의 텍스트 65,536자·로그 16,000자 제한은 유지합니다. DB 용량 불일치(SQLState 22001)는 중복 데이터 충돌과 구분하여 `500 DATA_STORAGE_ERROR`로 응답합니다.
+기존 `@Lob` 기본 매핑으로 생성한 MariaDB의 `run_text_entity.text`와 `run_log_entity.message`가 `TINYTEXT`라면 255바이트를 넘는 분류 보고서·로그가 저장되지 않습니다. 수정된 JPA 매핑은 배포 DDL과 동일하게 `LONGTEXT`를 명시합니다. V1은 두 열을 `LONGTEXT`로 생성합니다. 기존 DB 최초 편입 시에는 `database/expand-run-text-columns.sql`을 검토해 두 열을 확장하며 기존 기록은 보존합니다. API의 텍스트 65,536자·로그 16,000자 제한은 유지합니다. DB 용량 불일치(SQLState 22001)는 중복 데이터 충돌과 구분하여 `500 DATA_STORAGE_ERROR`로 응답합니다.
 
 - `auth`: 회원가입/이메일 인증, 쿠키 로그인·갱신·로그아웃 및 JWT 인증
 - `user`: 사용자 상태 전이, 권한과 프로필 저장
