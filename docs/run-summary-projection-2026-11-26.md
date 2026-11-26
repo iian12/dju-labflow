@@ -56,4 +56,19 @@ Windows의 MariaDB 11.8.6, InnoDB 버퍼 풀 32MiB, 20개 Run × 5개 지표, �
 
 V1은 수정하지 않았고 V2 적용 시 기존 원본을 보존한다. 최초 전환에는 모든 구버전 메트릭 writer를 중지해야 한다. DB 백업, 복제본 backfill 확인, 롤백 후 요약 재구축은 `backend/database/README.md`와 `rebuild-run-metric-summary.sql`을 따른다.
 
-이번 변경의 정량적 트레이드오프는 원본 저장마다 요약 갱신이 추가되는 것이다. 운영 반영 후 같은 데이터 규모와 부하에서 요약 API 지연, 쓰기 API 지연, 잠금 대기, DB CPU 및 마지막 5분의 성능을 다시 비교해야 한다. 이 문서의 로컬 검증은 운영 배포 및 새로운 2시간 부하 테스트를 완료했다는 의미가 아니다.
+이번 변경의 정량적 트레이드오프는 원본 저장마다 요약 갱신이 추가되는 것이다. 같은 데이터 규모와 부하에서 요약 API 지연, 쓰기 API 지연, 잠금 대기, DB CPU 및 마지막 5분의 성능을 다시 비교해야 한다. 위 로컬 SQL 결과와 아래 배포 검증은 새로운 2시간 부하 테스트의 결과가 아니다.
+
+## Raspberry Pi 배포 검증 — 2026-11-26
+
+- 실행 버전: `4f6f46fdad20c42212f07d8f88f02f9900687d4a`. 이전 버전은 `0d9317a7faf54d4fc8595e6d87d990f4ee6cc368`.
+- NVMe ext4의 `/mnt/nvme/labflow/releases/summary-4f6f46f-20261126`에 백엔드와 새 프론트엔드를 함께 배포했다. `current` 링크와 실제 Java 작업 디렉터리, 로컬/서버 JAR SHA-256 일치를 확인했다.
+- 애플리케이션 writer를 중지하고 `/mnt/nvme/labflow/shared/backups/before-summary-4f6f46f-20261126131401.sql.gz`를 저장한 뒤 gzip 검증을 통과했다. DB 백업은 NVMe 내부의 배포 복구용이며 외부 백업을 의미하지 않는다.
+- 13:14 KST에 Flyway V2가 성공했다. 운영 DB의 기존 메트릭은 0건이었으므로 대량 backfill 검증은 위 로컬 MariaDB 10만 건 검사에 해당한다.
+- 기존 cloudflared 프로세스를 유지했으며 외부 주소는 `https://store-designation-estimates-said.trycloudflare.com`으로 유지했다.
+- 실제 외부 Edge·Python SDK에서 로그인, Secure/HttpOnly 쿠키, 프로젝트 공개 범위, 키 발급, 메트릭·로그·텍스트·Heartbeat, 1MiB 파일 왕복 SHA-256, 세션 갱신, 프로젝트 삭제·키 무효화·로그아웃을 검증했다.
+- 새 Run에서 중복 요청, 과거 시각의 기록, 같은 시각의 새 기록을 보냈다. DB에는 원본 6행과 요약 2행이 저장됐으며 마지막 step 200을 확인했다. 실제 웹 화면의 갱신 관측 시간은 5,499ms였다. 이는 5초 polling에 따른 표시 지연이며 API 응답 시간이나 p95가 아니다.
+- 종료 후 최종 조회, 11초 동안 추가 요약 polling 중단, 수동 새로고침을 확인했다.
+- Prometheus 대상 3개 UP, Grafana 쿼리 30개 정상. DB·백엔드·게이트웨이·터널 모두 active, 서비스 자동 재시작 0회.
+- 13:18 KST 정리 후 기존 사용자 1명 보존, 임시 사용자·프로젝트·Run·메트릭·요약·파일 메타데이터·물리 파일은 모두 0건. 검증용 자격 증명과 seed SQL도 제거했다. 온도 52.9°C와 throttled=0x0은 종료 시점의 단일 표본이다.
+
+외부 검증 원본 보고서와 화면은 로컬 `.external-access/redeploy-4f6f46f/verification`에 보관한다. 운영 반영 후 새 2시간 부하 테스트는 아직 실행하지 않았다.
