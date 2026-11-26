@@ -13,6 +13,7 @@ import com.dju.labflow.run.parameter.application.RunParameterCommand;
 import com.dju.labflow.run.parameter.domain.*;
 import com.dju.labflow.run.parameter.domain.repository.RunParameterRepository;
 import com.dju.labflow.run.run.domain.*;
+import com.dju.labflow.run.run.domain.repository.RunSummaryRepository;
 import com.dju.labflow.run.run.exception.RunStateConflictException;
 import com.dju.labflow.run.systemmetric.application.RunSystemMetricCommand;
 import com.dju.labflow.run.systemmetric.domain.*;
@@ -38,6 +39,7 @@ public class RunRecordService {
     private final RunAccessPolicy runAccessPolicy;
     private final RunParameterRepository runParameterRepository;
     private final RunMetricRepository runMetricRepository;
+    private final RunSummaryRepository runSummaryRepository;
     private final RunLogRepository runLogRepository;
     private final RunTextRepository runTextRepository;
     private final RunSystemMetricRepository runSystemMetricRepository;
@@ -49,6 +51,7 @@ public class RunRecordService {
             RunAccessPolicy runAccessPolicy,
             RunParameterRepository runParameterRepository,
             RunMetricRepository runMetricRepository,
+            RunSummaryRepository runSummaryRepository,
             RunLogRepository runLogRepository,
             RunTextRepository runTextRepository,
             RunSystemMetricRepository runSystemMetricRepository,
@@ -58,6 +61,7 @@ public class RunRecordService {
         this.runAccessPolicy = runAccessPolicy;
         this.runParameterRepository = runParameterRepository;
         this.runMetricRepository = runMetricRepository;
+        this.runSummaryRepository = runSummaryRepository;
         this.runLogRepository = runLogRepository;
         this.runTextRepository = runTextRepository;
         this.runSystemMetricRepository = runSystemMetricRepository;
@@ -108,6 +112,7 @@ public class RunRecordService {
         requireRunning(principal, runId);
         ArrayList<RunMetricId> ids = new ArrayList<>();
         Instant recordedAt = recordedAt(command.recordedAt());
+        ArrayList<RunMetric> saved = new ArrayList<>();
         for (Map.Entry<String, Double> entry : command.metrics().entrySet()) {
             RunMetric record =
                     RunMetric.create(
@@ -119,8 +124,11 @@ public class RunRecordService {
                             command.step(),
                             command.elapsedTime(),
                             recordedAt);
-            ids.add(runMetricRepository.save(record).getId());
+            RunMetric persisted = runMetricRepository.save(record);
+            ids.add(persisted.getId());
+            saved.add(persisted);
         }
+        runSummaryRepository.recordMetrics(saved);
         return List.copyOf(ids);
     }
 

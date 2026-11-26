@@ -26,6 +26,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -116,6 +117,8 @@ class RunQueryHttpTests {
     @Autowired ProjectApiKeyService issuance;
     @Autowired RunService runs;
     @Autowired RunRecordService records;
+    @Autowired com.dju.labflow.run.run.domain.repository.RunSummaryRepository summaries;
+    @Autowired com.dju.labflow.sdk.request.application.SdkRequestService requests;
     @Autowired AccessTokenProvider tokens;
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager transactions;
@@ -593,6 +596,210 @@ class RunQueryHttpTests {
         for (String selection : List.of("0", "-1", f.run().value() + "," + f.run().value(), ""))
             mvc.perform(get(base(f) + "/summaries").param("runIds", selection))
                     .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void summaryTracksOutOfOrderAndEqualTimestampMetricsWithoutLosingMaximumStep() {
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        Instant time = Instant.parse("2026-11-26T00:00:00Z");
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(null, 10L, null, Map.of("loss", 0.5), time));
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(null, 100L, null, Map.of("loss", 0.8), time.minusSeconds(1)));
+        records.metrics(
+                f.principal(),
+                f.run(),
+                new RunMetricCommand(null, null, null, Map.of("loss", 0.3, "accuracy", 0.9), time));
+        assertSummaryMatchesHistory(f);
+        com.dju.labflow.run.run.domain.RunSummary summary =
+                summaries.findByProject(f.project(), List.of(f.run().value())).getFirst();
+        assertThat(summary.lastStep()).isEqualTo(100L);
+        assertThat(summary.metrics())
+                .extracting(com.dju.labflow.run.metric.domain.RunMetric::getValue)
+                .containsExactly(0.9, 0.3);
+    }
+
+    @Test
+    void summaryAndMetricsRollbackWithTheOuterTransaction() {
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status -> {
+                            records.metrics(
+                                    f.principal(),
+                                    f.run(),
+                                    new RunMetricCommand(
+                                            null, 1L, null, Map.of("loss", 0.5), null));
+                            status.setRollbackOnly();
+                        });
+        assertThat(
+                        summaries
+                                .findByProject(f.project(), List.of(f.run().value()))
+                                .getFirst()
+                                .metrics())
+                .isEmpty();
+        assertThat(metricCount(f)).isZero();
+    }
+
+    @Test
+    void failedSummaryWriteRollsBackMetricsAndRequestIdentityAndAllowsRetry() {
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        String requestId = "summary-rollback";
+        RunMetricCommand command =
+                new RunMetricCommand(null, 777777L, null, Map.of("loss", 0.5), null);
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status ->
+                                em.createNativeQuery(
+                                                "alter table run_metric_summary add constraint test_summary_failure check (max_step <> 777777)")
+                                        .executeUpdate());
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    requests.execute(
+                                            f.principal(),
+                                            requestId,
+                                            "metrics",
+                                            f.run(),
+                                            command,
+                                            () -> {
+                                                records.metrics(f.principal(), f.run(), command);
+                                                return f.run();
+                                            }))
+                    .isInstanceOf(RuntimeException.class);
+            assertThat(metricCount(f)).isZero();
+            assertThat(
+                            summaries
+                                    .findByProject(f.project(), List.of(f.run().value()))
+                                    .getFirst()
+                                    .metrics())
+                    .isEmpty();
+        } finally {
+            new TransactionTemplate(transactions)
+                    .executeWithoutResult(
+                            status ->
+                                    em.createNativeQuery(
+                                                    "alter table run_metric_summary drop constraint test_summary_failure")
+                                            .executeUpdate());
+        }
+        for (int attempt = 0; attempt < 2; attempt++)
+            requests.execute(
+                    f.principal(),
+                    requestId,
+                    "metrics",
+                    f.run(),
+                    command,
+                    () -> {
+                        records.metrics(f.principal(), f.run(), command);
+                        return f.run();
+                    });
+        assertThat(metricCount(f)).isEqualTo(1L);
+        assertSummaryMatchesHistory(f);
+    }
+
+    @Test
+    void concurrentMetricWritersKeepSummaryEquivalentToTheOriginalAggregate() throws Exception {
+        Fixture f = fixture(ProjectVisibility.PUBLIC);
+        Instant time = Instant.parse("2026-11-26T00:00:00Z");
+        try (ExecutorService pool = Executors.newFixedThreadPool(4)) {
+            List<Future<?>> writes = new ArrayList<>();
+            for (int i = 0; i < 32; i++) {
+                int index = i;
+                writes.add(
+                        pool.submit(
+                                () ->
+                                        records.metrics(
+                                                f.principal(),
+                                                f.run(),
+                                                new RunMetricCommand(
+                                                        null,
+                                                        (long) index,
+                                                        null,
+                                                        Map.of("loss", (double) index),
+                                                        time.plusSeconds(index % 3)))));
+            }
+            for (Future<?> write : writes) write.get(20, TimeUnit.SECONDS);
+        }
+        assertThat(metricCount(f)).isEqualTo(32L);
+        assertSummaryMatchesHistory(f);
+    }
+
+    @Test
+    void deletingProjectRemovesItsSummaryRowsAndKeepsOtherProjects() {
+        Fixture first = fixture(ProjectVisibility.PUBLIC),
+                other = fixture(ProjectVisibility.PUBLIC);
+        for (Fixture f : List.of(first, other))
+            records.metrics(
+                    f.principal(),
+                    f.run(),
+                    new RunMetricCommand(null, 1L, null, Map.of("loss", 0.5), null));
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status -> {
+                            projects.findByIdForUpdate(first.project()).orElseThrow();
+                            contents.deleteByProjectId(first.project());
+                        });
+        Long rows =
+                new TransactionTemplate(transactions)
+                        .execute(
+                                status ->
+                                        em.createQuery(
+                                                        "select count(s) from RunMetricSummaryEntity s where s.runId = :run",
+                                                        Long.class)
+                                                .setParameter("run", first.run().value())
+                                                .getSingleResult());
+        assertThat(rows).isZero();
+        assertSummaryMatchesHistory(other);
+    }
+
+    private Long metricCount(Fixture f) {
+        return new TransactionTemplate(transactions)
+                .execute(
+                        status ->
+                                em.createQuery(
+                                                "select count(m) from RunMetricEntity m where m.runId = :run",
+                                                Long.class)
+                                        .setParameter("run", f.run().value())
+                                        .getSingleResult());
+    }
+
+    private void assertSummaryMatchesHistory(Fixture f) {
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status -> {
+                            List<?> rows =
+                                    em.createNativeQuery(
+                                                    """
+                select id from (
+                    select id, metric_key, row_number() over (partition by metric_key order by recorded_at desc,id desc) rn
+                    from run_metric_entity where run_id = :run
+                ) ranked where rn = 1 order by metric_key
+                """)
+                                            .setParameter("run", f.run().value())
+                                            .getResultList();
+                            List<Long> expectedIds =
+                                    rows.stream().map(row -> ((Number) row).longValue()).toList();
+                            Long maxStep =
+                                    em.createQuery(
+                                                    "select max(m.step) from RunMetricEntity m where m.runId = :run",
+                                                    Long.class)
+                                            .setParameter("run", f.run().value())
+                                            .getSingleResult();
+                            com.dju.labflow.run.run.domain.RunSummary summary =
+                                    summaries
+                                            .findByProject(f.project(), List.of(f.run().value()))
+                                            .getFirst();
+                            assertThat(
+                                            summary.metrics().stream()
+                                                    .map(metric -> metric.getId().value())
+                                                    .toList())
+                                    .isEqualTo(expectedIds);
+                            assertThat(summary.lastStep()).isEqualTo(maxStep);
+                        });
     }
 
     @Test

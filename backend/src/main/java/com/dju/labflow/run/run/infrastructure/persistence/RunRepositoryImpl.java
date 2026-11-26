@@ -94,10 +94,8 @@ public class RunRepositoryImpl implements RunRepository {
         String join = "", order = "r.startedAt desc, r.id desc";
         if (search.sort().equals("high") || search.sort().equals("low")) {
             join =
-                    " left join RunMetricEntity m on m.runId = r.id and m.key = :metricKey "
-                            + "and not exists (select n.id from RunMetricEntity n where n.runId = m.runId "
-                            + "and n.key = m.key and (n.recordedAt > m.recordedAt "
-                            + "or (n.recordedAt = m.recordedAt and n.id > m.id)))";
+                    " left join RunMetricSummaryEntity s on s.runId = r.id and s.seriesKey = :metricKey "
+                            + "left join RunMetricEntity m on m.id = s.latestMetricId";
             order =
                     "case when m.value is null then 1 else 0 end, m.value "
                             + (search.sort().equals("high") ? "desc" : "asc")
@@ -126,8 +124,8 @@ public class RunRepositoryImpl implements RunRepository {
                         .getResultList()) counts.put((RunStatus) row[0], (Long) row[1]);
         List<String> keys =
                 em.createQuery(
-                                "select distinct m.key from RunMetricEntity m "
-                                        + "where m.runId in (select r.id from RunEntity r where r.projectId = :project) order by m.key",
+                                "select distinct m.seriesKey from RunMetricSummaryEntity m "
+                                        + "where m.runId in (select r.id from RunEntity r where r.projectId = :project) order by m.seriesKey",
                                 String.class)
                         .setParameter("project", projectId.value())
                         .getResultList();

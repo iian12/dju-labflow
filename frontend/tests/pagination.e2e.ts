@@ -110,3 +110,98 @@ test('terminal records load the final page and stop automatic polling', async ()
     assert.equal(states, stateCount);
   } finally { await browser.close(); }
 });
+
+test('summary polling updates visible runs, reads the final value, then stops until manual refresh', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const page = await browser.newPage();
+  let completed = false, value = 0.5, summaryReads = 0;
+  await page.clock.install();
+  await page.route('**/api/v1/**', route => {
+    const url = new URL(route.request().url()), path = url.pathname;
+    if (path.endsWith('/auth/me')) return route.fulfill({ json: { userId: '1', name: 'Reader', email: 'reader@example.com' } });
+    if (path === '/api/v1/projects') return route.fulfill({ json: { items: [project], totalPages: 1 } });
+    if (path === '/api/v1/projects/1') return route.fulfill({ json: project });
+    if (path.endsWith('/runs')) return route.fulfill({ json: {
+      items: [{ ...runs[0], status: completed ? 'COMPLETED' : 'RUNNING', endedAt: completed ? when : null }],
+      page: 0, totalPages: 1, totalElements: 1, counts: { RUNNING: completed ? 0 : 1, COMPLETED: completed ? 1 : 0, FAILED: 0 }, availableMetrics: ['score']
+    } });
+    if (path.endsWith('/summaries')) {
+      summaryReads++;
+      assert.equal(url.searchParams.get('runIds'), '1');
+      return route.fulfill({ json: [{ runId: '1', lastStep: 1, metrics: [{ ...point('1'), key: 'score', value }] }] });
+    }
+    return route.fulfill({ status: 404, json: {} });
+  });
+  try {
+    await page.goto(`${base}/#/projects/1/runs`);
+    await page.getByRole('cell', { name: '0.5', exact: true }).waitFor();
+    value = 0.75;
+    await page.clock.runFor(5100);
+    await page.getByRole('cell', { name: '0.75', exact: true }).waitFor();
+    completed = true; value = 0.9;
+    await page.clock.runFor(5100);
+    await page.getByRole('cell', { name: '0.9', exact: true }).waitFor();
+    await page.getByRole('row').filter({ hasText: 'run-001' }).locator('.badge.COMPLETED').waitFor();
+    const stoppedAt = summaryReads;
+    await page.clock.runFor(16000);
+    assert.equal(summaryReads, stoppedAt, 'Terminal summaries are not polled with the discovery list');
+    value = 0.95;
+    await page.getByRole('button', { name: '새로고침', exact: true }).click();
+    await page.getByRole('cell', { name: '0.95', exact: true }).waitFor();
+    assert.equal(summaryReads, stoppedAt + 1);
+  } finally { await browser.close(); }
+});
+
+test('summary polling pauses in hidden tabs, backs off failures, and never overlaps slow requests', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const page = await browser.newPage();
+  let reads = 0, value = 0.5, fail = false, hold = false;
+  let release: (() => void) | undefined;
+  let markPending: (() => void) | undefined;
+  const pending = new Promise<void>(resolve => { markPending = resolve; });
+  await page.clock.install();
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/auth/me')) return route.fulfill({ json: { userId: '1', name: 'Reader', email: 'reader@example.com' } });
+    if (path === '/api/v1/projects') return route.fulfill({ json: { items: [project], totalPages: 1 } });
+    if (path === '/api/v1/projects/1') return route.fulfill({ json: project });
+    if (path.endsWith('/runs')) return route.fulfill({ json: { items: [{ ...runs[0], status: 'RUNNING', endedAt: null }],
+      page: 0, totalPages: 1, totalElements: 1, counts: { RUNNING: 1, COMPLETED: 0, FAILED: 0 }, availableMetrics: ['score'] } });
+    if (path.endsWith('/summaries')) {
+      reads++;
+      if (hold) await new Promise<void>(resolve => { release = resolve; markPending?.(); });
+      if (fail) { fail = false; return route.fulfill({ status: 503, json: { message: 'summary unavailable' } }); }
+      return route.fulfill({ json: [{ runId: '1', lastStep: 1, metrics: [{ ...point('1'), key: 'score', value }] }] });
+    }
+    return route.fulfill({ status: 404, json: {} });
+  });
+  try {
+    await page.goto(`${base}/#/projects/1/runs`);
+    await page.getByRole('cell', { name: '0.5', exact: true }).waitFor();
+    await page.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }));
+    const beforeHidden = reads;
+    await page.clock.runFor(16000);
+    assert.equal(reads, beforeHidden);
+    value = 0.7;
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.getByRole('cell', { name: '0.7', exact: true }).waitFor();
+    fail = true;
+    await page.clock.runFor(5100);
+    await page.getByRole('alert').filter({ hasText: 'summary unavailable' }).waitFor();
+    const afterFailure = reads;
+    await page.clock.runFor(5100);
+    assert.equal(reads, afterFailure, 'Failed polling waits longer before retrying');
+    value = 0.9;
+    await page.clock.runFor(5100);
+    await page.getByRole('cell', { name: '0.9', exact: true }).waitFor();
+    hold = true;
+    await page.clock.runFor(5100);
+    await pending;
+    assert.ok(release);
+    const pendingAt = reads;
+    await page.clock.runFor(16000);
+    assert.equal(reads, pendingAt, 'A pending summary request is never duplicated');
+    value = 0.95; hold = false; release!();
+    await page.getByRole('cell', { name: '0.95', exact: true }).waitFor();
+  } finally { release?.(); await browser.close(); }
+});

@@ -32,6 +32,16 @@ public final class SchemaVerifier {
     private SchemaVerifier() {}
 
     public static void verify(String url, String user, String password) throws Exception {
+        verify(url, user, password, false);
+    }
+
+    /** 이력이 없는 기존 DB의 V1 편입에는 이후 마이그레이션의 테이블을 요구하지 않는다. */
+    public static void verifyVersionOne(String url, String user, String password) throws Exception {
+        verify(url, user, password, true);
+    }
+
+    private static void verify(String url, String user, String password, boolean versionOne)
+            throws Exception {
         StandardServiceRegistry registry =
                 new StandardServiceRegistryBuilder()
                         .applySetting("jakarta.persistence.jdbc.url", url)
@@ -47,8 +57,14 @@ public final class SchemaVerifier {
             ClassPathScanningCandidateComponentProvider scanner =
                     new ClassPathScanningCandidateComponentProvider(false);
             scanner.addIncludeFilter(new AnnotationTypeFilter(Entity.class));
-            for (BeanDefinition entity : scanner.findCandidateComponents("com.dju.labflow"))
-                sources.addAnnotatedClass(Class.forName(entity.getBeanClassName()));
+            for (BeanDefinition entity : scanner.findCandidateComponents("com.dju.labflow")) {
+                Class<?> type = Class.forName(entity.getBeanClassName());
+                if (versionOne
+                        && type
+                                == com.dju.labflow.run.run.infrastructure.persistence
+                                        .RunMetricSummaryEntity.class) continue;
+                sources.addAnnotatedClass(type);
+            }
             Metadata metadata = sources.buildMetadata();
             try (SessionFactory ignored = metadata.buildSessionFactory();
                     Connection connection = DriverManager.getConnection(url, user, password)) {

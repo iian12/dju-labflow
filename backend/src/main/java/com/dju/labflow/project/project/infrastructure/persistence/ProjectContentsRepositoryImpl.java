@@ -47,6 +47,7 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
                 projectId);
         for (String table :
                 new String[] {
+                    "run_metric_summary",
                     "run_parameter_entity",
                     "run_metric_entity",
                     "run_log_entity",

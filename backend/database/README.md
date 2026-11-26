@@ -1,8 +1,17 @@
 # DB 스키마 관리
 
-현재 코드의 공식 기준은 `src/main/resources/db/migration/V1__initial_schema.sql`입니다. 사용자·프로젝트·키·토큰·이메일 인증·요청 제한·Run과 기록·파일·SDK 멱등성까지 **16개 테이블**을 포함합니다. V1에는 Heartbeat 컬럼, LONGTEXT 확장과 최신 지표 인덱스도 이미 포함되어 있습니다. 최초 관리 버전은 단일 V1이며 이후 변경부터 V2 이상을 추가합니다.
+현재 코드의 공식 기준은 `src/main/resources/db/migration`의 V1과 V2입니다. V1은 사용자·프로젝트·키·토큰·이메일 인증·요청 제한·Run과 기록·파일·SDK 멱등성까지 **16개 테이블**을 포함합니다. V2는 지표별 요약 테이블 `run_metric_summary`를 추가하고 기존 이력을 채웁니다. 적용된 V1은 수정하지 않습니다.
 
-Flyway가 DDL 변경을 담당하고 JPA는 `validate`로 매핑만 검사합니다. 빈 DB는 백엔드 시작 시 V1을 적용하고, 이후 시작에서는 미적용 버전만 실행합니다. `APP_PROFILE=prod`는 `JPA_DDL_AUTO=update`가 설정되어 있어도 `validate`를 사용합니다. 일반 H2 회귀 테스트만 Flyway를 끄고 `create-drop`을 유지합니다.
+Flyway가 DDL 변경을 담당하고 JPA는 `validate`로 매핑만 검사합니다. 빈 DB는 백엔드 시작 시 V1부터 최신 버전까지 적용하고, 이후 시작에서는 미적용 버전만 실행합니다. `APP_PROFILE=prod`는 `JPA_DDL_AUTO=update`가 설정되어 있어도 `validate`를 사용합니다. 일반 H2 회귀 테스트만 Flyway를 끄고 `create-drop`을 유지합니다.
+
+## V2 요약 테이블 전환
+
+- 모든 메트릭 기록 서버를 중지하고 DB를 백업한 뒤 새 버전을 시작합니다. 기존 버전과 새 버전을 동시에 운영하는 롤링 배포는 지원하지 않습니다. V2 backfill과 새 writer 전환 사이에 과거 writer가 기록을 추가하면 요약이 누락될 수 있습니다.
+- 최신 기록은 `(recorded_at, id)` 내림차순, 마지막 step은 모든 기록의 최대값이며 NULL은 제외합니다. 한 `(run_id, metric_key)`당 최신 원본 ID·기록 시각·최대 step만 보관합니다. 원본 이력은 변경하지 않습니다.
+- 메트릭과 요약 UPSERT, SDK 요청 처리 기록은 같은 트랜잭션에서 커밋됩니다. 프로젝트 → Run 잠금을 유지하며 요약 갱신 실패 시 원본도 롤백됩니다.
+- 이력이 없는 DB의 `schemaCheck`/`schemaBaseline`은 V1 구조를 검사합니다. V1 이력을 기록한 뒤 기동하면 V2가 적용됩니다. V2 적용 DB의 `schemaCheck`는 요약 테이블도 검사합니다.
+- 데이터가 큰 DB는 복제본에서 backfill 시간·임시 디스크 사용량을 측정하고 점검 시간을 확보합니다. MariaDB DDL은 암묵적으로 커밋되므로 V2 전체가 원자적으로 롤백되는 것은 아닙니다. 실패 시 Flyway 이력과 실제 테이블 상태를 확인하고 원인을 해결한 뒤 복구해야 합니다.
+- V2 이전 앱으로 롤백한 뒤 기록이 추가되었다면, 다시 새 앱을 시작하기 전에 모든 서버를 중지한 상태에서 `rebuild-run-metric-summary.sql`을 실행하고 기존 집계와 비교합니다. SQL 오류 시 중단·ROLLBACK하는 클라이언트를 사용하고 `--force`로 계속 실행하지 않습니다. 원본은 삭제하지 않으며 적용된 V2를 수정하거나 재실행하지 않습니다.
 
 ## 새 DB
 

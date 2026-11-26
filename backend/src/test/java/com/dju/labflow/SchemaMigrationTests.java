@@ -25,7 +25,7 @@ class SchemaMigrationTests {
     void emptyDatabaseMigratesTheCompleteSchemaOnceAndPreservesExistingRows() throws Exception {
         String url = database();
         Flyway flyway = flyway(url, "classpath:db/migration");
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
             HashSet<String> tables = new HashSet<>();
             try (ResultSet result =
@@ -46,6 +46,7 @@ class SchemaMigrationTests {
                             "RUN_METADATA",
                             "RUN_PARAMETER_ENTITY",
                             "RUN_METRIC_ENTITY",
+                            "RUN_METRIC_SUMMARY",
                             "RUN_LOG_ENTITY",
                             "RUN_TEXT_ENTITY",
                             "RUN_SYSTEM_METRIC_ENTITY",
@@ -55,7 +56,7 @@ class SchemaMigrationTests {
             insertUser(connection);
         }
         assertThat(flyway.migrate().migrationsExecuted).isZero();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertUserPreserved(url);
         assertThatThrownBy(flyway::clean).isInstanceOf(FlywayException.class);
@@ -75,9 +76,58 @@ class SchemaMigrationTests {
                 .hasMessageContaining("non-empty");
         assertThat(flyway.info().current()).isNull();
         flyway.baseline();
-        assertThat(flyway.migrate().migrationsExecuted).isZero();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
         assertUserPreserved(url);
+    }
+
+    @Test
+    void summaryMigrationBackfillsLatestByTimeAndIdAndIndependentMaximumStep() throws Exception {
+        String url = database();
+        Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations("classpath:db/migration")
+                .target("1")
+                .load()
+                .migrate();
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+                Statement statement = connection.createStatement()) {
+            statement.executeUpdate(
+                    """
+                insert into run_metric_entity(id,run_id,metric_key,metric_value,step,recorded_at) values
+                (1,10,'loss',0.8,100,'2026-11-25 00:00:00'),
+                (2,10,'loss',0.5,5,'2026-11-26 00:00:00'),
+                (3,10,'loss',0.3,null,'2026-11-26 00:00:00'),
+                (4,10,'accuracy',0.9,null,'2026-11-26 00:00:00'),
+                (5,20,'loss',0.7,0,'2026-11-26 00:00:00')
+                """);
+        }
+        assertThat(flyway(url, "classpath:db/migration").migrate().migrationsExecuted).isEqualTo(1);
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+                Statement statement = connection.createStatement();
+                ResultSet result =
+                        statement.executeQuery(
+                                "select run_id,metric_key,latest_metric_id,max_step from run_metric_summary order by run_id,metric_key")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(2)).isEqualTo("accuracy");
+            assertThat(result.getLong(3)).isEqualTo(4);
+            assertThat(result.getObject(4)).isNull();
+            assertThat(result.next()).isTrue();
+            assertThat(result.getLong(3)).isEqualTo(3);
+            assertThat(result.getLong(4)).isEqualTo(100);
+            assertThat(result.next()).isTrue();
+            assertThat(result.getLong(1)).isEqualTo(20);
+            assertThat(result.getLong(4)).isZero();
+            assertThat(result.next()).isFalse();
+        }
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+                ResultSet result =
+                        connection
+                                .createStatement()
+                                .executeQuery("select count(*) from run_metric_entity")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getLong(1)).isEqualTo(5);
+        }
     }
 
     @Test

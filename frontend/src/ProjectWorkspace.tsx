@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api, projectPath } from './api.ts';
 import type { Page } from './api.ts';
 import { useApi, useData } from './useData.ts';
@@ -47,16 +47,21 @@ export default function ProjectWorkspace({ project, view, runId, tab, scope, own
     if (view === 'overview' && response.counts.RUNNING + response.counts.FAILED > 0) {
       attention = (await api<RunList>(`${path}?page=0&size=3&status=RUNNING,FAILED`, { signal })).items;
     }
-    const summaries: Record<string, Summary> = {};
-    const ids = [...new Set([...response.items, ...attention].map(run => run.runId))];
-    if (ids.length) {
-      const summaryQuery = new URLSearchParams({ runIds: ids.join(',') });
-      for (const summary of await api<Summary[]>(`${path}/summaries?${summaryQuery}`, { signal })) summaries[summary.runId] = summary;
-    }
-    return { items: response.items, total: response.projectTotal ?? Object.values(response.counts).reduce((sum, count) => sum + count, 0), matched: response.totalElements, page: response.page, totalPages: response.totalPages, counts: response.counts, summaries, attention,
-      metrics: response.availableMetrics ?? [...new Set(Object.values(summaries).flatMap(summary => summary.metrics.map(metric => metric.key!)))].sort() };
+    return { items: response.items, total: response.projectTotal ?? Object.values(response.counts).reduce((sum, count) => sum + count, 0), matched: response.totalElements, page: response.page, totalPages: response.totalPages, counts: response.counts, summaries: {}, attention,
+      metrics: response.availableMetrics ?? [] };
   }, 5000, data => view !== 'compare' || data.items.some(run => run.status === 'RUNNING'));
-  const data = result.data, runs = data?.items ?? [];
+  const summaryRuns = [...new Map([...(result.data?.items ?? []), ...(result.data?.attention ?? [])].map(run => [run.runId, run])).values()];
+  const summaryQuery = new URLSearchParams({ runIds: summaryRuns.map(run => run.runId).join(',') });
+  // 상태 변화는 종료 직후의 최종 조회를 유발한다. 목록 polling과 분리해 종료된 페이지는 재집계하지 않는다.
+  const summaryKey = active && summaryRuns.length ? `${scope}:${path}/summaries?${summaryQuery}:${summaryRuns.map(run => run.status).join(',')}` : null;
+  const summaryResult = useData<Record<string, Summary>>(summaryKey, async signal => Object.fromEntries(
+    (await api<Summary[]>(`${path}/summaries?${summaryQuery}`, { signal })).map(summary => [summary.runId, summary])
+  ), 5000, () => summaryRuns.some(run => run.status === 'RUNNING'));
+  const data = useMemo(() => result.data ? { ...result.data, summaries: summaryResult.data ?? {},
+    metrics: [...new Set([...result.data.metrics, ...Object.values(summaryResult.data ?? {}).flatMap(summary => summary.metrics.map(point => point.key!))])].sort()
+  } : undefined, [result.data, summaryResult.data]);
+  const runs = data?.items ?? [];
+  const refresh = () => { result.refresh(); summaryResult.refresh(); };
   useEffect(() => { if (data) { setKnownMetrics(previous => JSON.stringify(previous) === JSON.stringify(data.metrics) ? previous : data.metrics); setProjectTotal(data.total); if (listView && page > 0 && page >= data.totalPages) setPage(Math.max(0, data.totalPages - 1)); } }, [data, listView, page]);
   const metrics = data?.metrics ?? knownMetrics;
   const metric = metrics.includes(state.metric) ? state.metric : metrics[0] ?? '';
@@ -64,8 +69,8 @@ export default function ProjectWorkspace({ project, view, runId, tab, scope, own
   const select = (id: string) => { if (!selected.includes(id) && selected.length >= 4) { setNotice('최대 4개의 Run을 선택할 수 있습니다.'); return; } setNotice(''); update({ selected: selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id] }); };
   const value = (run: LiveRun) => data?.summaries[run.runId]?.metrics.find(point => point.key === metric)?.value;
   return <><div className="project-heading"><div className="project-heading-copy"><h1>{project.name}</h1>{project.description && <p>{project.description}</p>}</div><ProjectTabs projectId={project.projectId} view={view} runCount={data?.total ?? projectTotal}/></div>
-    <ErrorBox error={result.error} retry={result.refresh}/>{notice && <p role="status" className="live-empty">{notice}</p>}
-    {view === 'runs' && !runId && <><div className="toolbar"><div className="search"><span aria-hidden="true">⌕</span><input aria-label="Run 검색" placeholder="Run 이름 검색" value={state.query} onChange={event => update({ query: event.target.value })}/></div><label className="compact">표시 지표<select aria-label="표시 지표" value={metric} onChange={event => update({ metric: event.target.value })} disabled={!data?.metrics.length}>{!data?.metrics.length && <option value="">지표 없음</option>}{data?.metrics.map(key => <option key={key}>{key}</option>)}</select></label><select aria-label="정렬" value={state.sort} onChange={event => update({ sort: event.target.value, metric })}><option value="recent">최근 실행순</option><option value="high" disabled={!metric}>지표 높은순</option><option value="low" disabled={!metric}>지표 낮은순</option><option value="duration">소요 시간 짧은순</option></select><button onClick={result.refresh}>새로고침</button></div>
+    <ErrorBox error={result.error ?? summaryResult.error} retry={refresh}/>{notice && <p role="status" className="live-empty">{notice}</p>}
+    {view === 'runs' && !runId && <><div className="toolbar"><div className="search"><span aria-hidden="true">⌕</span><input aria-label="Run 검색" placeholder="Run 이름 검색" value={state.query} onChange={event => update({ query: event.target.value })}/></div><label className="compact">표시 지표<select aria-label="표시 지표" value={metric} onChange={event => update({ metric: event.target.value })} disabled={!data?.metrics.length}>{!data?.metrics.length && <option value="">지표 없음</option>}{data?.metrics.map(key => <option key={key}>{key}</option>)}</select></label><select aria-label="정렬" value={state.sort} onChange={event => update({ sort: event.target.value, metric })}><option value="recent">최근 실행순</option><option value="high" disabled={!metric}>지표 높은순</option><option value="low" disabled={!metric}>지표 낮은순</option><option value="duration">소요 시간 짧은순</option></select><button onClick={refresh}>새로고침</button></div>
       <div className="filters">{(['ALL','RUNNING','COMPLETED','FAILED'] as const).map(status => <button key={status} className={state.filter === status ? 'selected' : ''} onClick={() => update({ filter: status })}>{status === 'ALL' ? '전체' : labels[status]} <span>{status === 'ALL' ? data?.total ?? '—' : data?.counts[status] ?? '—'}</span></button>)}</div>
       {result.loading && <p role="status" className="live-empty">실험을 불러오는 중…</p>}{data && (data.total > 0 ? <RunsScroll key={state.query + state.filter + state.sort + page}><table className="runs-table"><colgroup><col className="runs-col-select"/><col className="runs-col-name"/><col className="runs-col-status"/><col className="runs-col-metric"/><col className="runs-col-step"/><col className="runs-col-duration"/><col/></colgroup><thead><tr><th>선택</th><th>Run</th><th>상태</th><th className="num">{metric || '지표'}</th><th className="num">마지막 Step</th><th className="num">소요 시간</th><th>시작 시각</th></tr></thead><tbody>{runs.map(run => <tr key={run.runId} className={selected.includes(run.runId) ? 'chosen' : ''}><td><input type="checkbox" aria-label={`${run.name} 선택`} checked={selected.includes(run.runId)} onChange={() => select(run.runId)}/></td><td><a className="run-link" title={run.name} href={`#/projects/${project.projectId}/runs/${run.runId}/metrics`}>{run.name}</a><small className="run-id">{run.runId}</small></td><td><Badge status={run.status} connectionStatus={run.connectionStatus}/></td><td className="num metric-number">{number(value(run))}</td><td className="num">{data.summaries[run.runId]?.lastStep ?? '—'}</td><td className="num">{duration(run.startedAt, run.endedAt)}</td><td className="muted">{date(run.startedAt)}</td></tr>)}</tbody></table>{!runs.length && <div className="empty"><h3>검색 결과가 없습니다</h3><button onClick={() => update({ query:'', filter:'ALL' })}>필터 초기화</button></div>}</RunsScroll> : <Empty title="첫 실험을 준비하세요"><p>프로젝트 설정에서 API 키를 발급하고 SDK로 첫 실험을 기록하세요.</p>{owner && <a href={`#/projects/${project.projectId}/settings`}>SDK 연결 설정 →</a>}</Empty>)}
       {data && data.totalPages > 1 && <nav className="pagination" aria-label="Run 목록 페이지"><span>{data.page + 1} / {data.totalPages} · {data.matched.toLocaleString()}개</span><div><button disabled={result.loading || data.page === 0} onClick={() => setPage(data.page - 1)}>이전 페이지</button><button disabled={result.loading || data.page + 1 >= data.totalPages} onClick={() => setPage(data.page + 1)}>다음 페이지</button></div></nav>}

@@ -8,15 +8,23 @@ export function useData<T>(key: string | null, loader: (signal: AbortSignal) => 
   useEffect(() => {
     if (key === null) return;
     const controller = new AbortController(); let running = false; let latest: T | undefined;
-    async function load() {
-      if (running) return; running = true;
-      try { const data = await current.current(controller.signal); latest = data; if (!controller.signal.aborted) setState({ key, data, loading: false }); }
-      catch (error) { if (!controller.signal.aborted) setState(previous => ({ key, data: previous.key === key ? previous.data : undefined, error, loading: false })); }
-      finally { running = false; }
+    let failures = 0, timer: ReturnType<typeof setTimeout> | undefined;
+    const shouldPoll = () => interval > 0 && (latest === undefined || !polling.current || polling.current(latest));
+    function schedule() {
+      if (controller.signal.aborted || !shouldPoll()) return;
+      timer = setTimeout(() => { if (document.hidden) schedule(); else void load(); }, Math.min(interval * 2 ** Math.min(failures, 4), 60_000));
     }
+    async function load() {
+      if (running || controller.signal.aborted) return; running = true;
+      if (timer) clearTimeout(timer);
+      try { const data = await current.current(controller.signal); latest = data; failures = 0; if (!controller.signal.aborted) setState({ key, data, loading: false }); }
+      catch (error) { failures++; if (!controller.signal.aborted) setState(previous => ({ key, data: previous.key === key ? previous.data : undefined, error, loading: false })); }
+      finally { running = false; schedule(); }
+    }
+    const resume = () => { if (!document.hidden && shouldPoll()) void load(); };
     void load();
-    const timer = interval ? setInterval(() => { if (!document.hidden && (latest === undefined || !polling.current || polling.current(latest))) void load(); }, interval) : undefined;
-    return () => { controller.abort(); if (timer) clearInterval(timer); };
+    if (interval) document.addEventListener('visibilitychange', resume);
+    return () => { controller.abort(); if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', resume); };
   }, [key, version, interval]);
   return { ...(key === null ? { loading: false, data: undefined, error: undefined } : state.key === key ? state : { loading: true, data: undefined, error: undefined }), refresh: () => setVersion(value => value + 1) };
 }
