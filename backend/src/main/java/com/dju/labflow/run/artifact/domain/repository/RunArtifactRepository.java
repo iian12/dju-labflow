@@ -13,8 +13,6 @@ public interface RunArtifactRepository {
 
     Optional<RunArtifact> findById(RunArtifactId id);
 
-    Optional<RunArtifact> findByRunIdAndClientRequestId(RunId runId, String clientRequestId);
-
     /** 생성 시각과 ID 오름차순으로 최대 limit개를 조회한다(1~1000). */
     List<RunArtifact> findByRunId(RunId runId, int limit);
 

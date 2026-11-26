@@ -7,6 +7,7 @@ import lombok.*;
 
 /** 원본 메트릭과 같은 트랜잭션에서 갱신하는 지표별 조회 모델. */
 @Entity
+@com.dju.labflow.global.schema.SchemaSince(2)
 @Table(name = "run_metric_summary")
 @IdClass(RunMetricSummaryEntity.Key.class)
 @Getter

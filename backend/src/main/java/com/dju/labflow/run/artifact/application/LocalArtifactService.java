@@ -5,7 +5,9 @@ import com.dju.labflow.run.artifact.domain.*;
 import com.dju.labflow.run.artifact.domain.repository.RunArtifactRepository;
 import com.dju.labflow.run.run.application.RunAccessPolicy;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.sdk.idempotency.*;
 import java.io.*;
+import java.nio.channels.*;
 import java.nio.file.*;
 import java.security.*;
 import java.util.HexFormat;
@@ -46,40 +48,86 @@ public class LocalArtifactService {
             RunId runId,
             String name,
             ArtifactKind kind,
-            String requestId,
+            IdempotencyStore.Claim claim,
             long length,
             InputStream input)
             throws IOException {
         if (length < 0) throw new ResponseStatusException(HttpStatus.LENGTH_REQUIRED);
         if (length > fileLimit) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE);
-        if (requestId == null || !requestId.matches("[a-zA-Z0-9_-]{1,64}"))
-            throw new IllegalArgumentException("Invalid request ID");
+        if (claim == null) throw new IllegalArgumentException("Idempotency-Key is required");
         RunArtifact reserved =
-                uploads.reserve(principal, runId, name, kind, requestId, length, projectLimit);
+                uploads.reserve(principal, runId, name, kind, claim, length, projectLimit);
         if (reserved.getStatus() == ArtifactStatus.READY) {
             return uploads.complete(
-                    principal, reserved, copy(input, OutputStream.nullOutputStream(), length));
+                    principal,
+                    reserved,
+                    copy(input, OutputStream.nullOutputStream(), length),
+                    claim);
         }
         Path path = root.resolve(reserved.getId().value().toString());
         Path partial = root.resolve(reserved.getId().value() + ".part");
-        try {
-            Files.createDirectories(root);
-            String sha256;
-            try (OutputStream out = Files.newOutputStream(partial, StandardOpenOption.CREATE_NEW)) {
-                sha256 = copy(input, out, length);
-            }
-            // Publication is a local rename, never a copy under a database lock.
-            Files.move(partial, path, StandardCopyOption.ATOMIC_MOVE);
-            return uploads.complete(principal, reserved, sha256);
-        } catch (IOException | RuntimeException | Error failure) {
-            remove(partial);
-            remove(path);
+        Path lockPath = root.resolve(".locks").resolve(reserved.getId().value().toString());
+        Files.createDirectories(lockPath.getParent());
+        boolean locked = false, retainFiles = false;
+        try (FileChannel channel =
+                FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+            FileLock lock;
             try {
-                uploads.discard(principal, reserved);
-            } catch (RuntimeException cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
+                lock = channel.tryLock();
+            } catch (OverlappingFileLockException busy) {
+                throw IdempotencyException.processing();
             }
-            throw failure;
+            if (lock == null) throw IdempotencyException.processing();
+            locked = true;
+            try (lock) {
+                boolean completing = false;
+                try {
+                    Files.createDirectories(root);
+                    // A crashed writer's OS lock is released. Reuse its reserved artifact.
+                    remove(partial);
+                    remove(path);
+                    String sha256;
+                    try (OutputStream out =
+                            Files.newOutputStream(partial, StandardOpenOption.CREATE_NEW)) {
+                        sha256 = copy(input, out, length);
+                    }
+                    Files.move(partial, path, StandardCopyOption.ATOMIC_MOVE);
+                    completing = true;
+                    retainFiles = true;
+                    RunArtifact completed = uploads.complete(principal, reserved, sha256, claim);
+                    return completed;
+                } catch (IOException | RuntimeException | Error failure) {
+                    if (completing) {
+                        // A commit acknowledgement can be lost after READY and the response were
+                        // saved.
+                        // Keep the published file if the database cannot confirm its outcome.
+                        try {
+                            java.util.Optional<RunArtifact> committed =
+                                    uploads.committedArtifact(reserved, claim);
+                            if (committed.isPresent()) return committed.get();
+                            retainFiles = false;
+                        } catch (RuntimeException unavailable) {
+                            failure.addSuppressed(unavailable);
+                            throw failure;
+                        }
+                    }
+                    // Cleanup stays under the same OS lock, so a resumed writer cannot publish
+                    // between deletion of the file and cancellation of its reservation.
+                    remove(partial);
+                    remove(path);
+                    try {
+                        uploads.discard(principal, reserved);
+                    } catch (RuntimeException cleanupFailure) {
+                        failure.addSuppressed(cleanupFailure);
+                    }
+                    throw failure;
+                }
+            }
+        } finally {
+            if (locked && !retainFiles) {
+                remove(lockPath);
+                removeEmptyLockDirectory();
+            }
         }
     }
 
@@ -116,6 +164,17 @@ public class LocalArtifactService {
         for (Long id : event.ids()) {
             remove(root.resolve(id.toString()));
             remove(root.resolve(id + ".part"));
+            remove(root.resolve(".locks").resolve(id.toString()));
+        }
+        removeEmptyLockDirectory();
+    }
+
+    private void removeEmptyLockDirectory() {
+        Path directory = root.resolve(".locks");
+        try (java.util.stream.Stream<Path> paths = Files.list(directory)) {
+            if (paths.findAny().isEmpty()) Files.deleteIfExists(directory);
+        } catch (IOException ignored) {
+            /* Another upload may own or create a lock concurrently. */
         }
     }
 

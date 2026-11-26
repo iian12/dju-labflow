@@ -81,7 +81,7 @@ class SdkRunHttpTests {
             mvc.perform(
                             post(path(id) + "/logs")
                                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
-                                    .header("X-Request-ID", requestId)
+                                    .header("Idempotency-Key", requestId)
                                     .header("X-Labflow-Replay", "true")
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content(body))
@@ -91,7 +91,7 @@ class SdkRunHttpTests {
         mvc.perform(
                         post(path(id) + "/logs")
                                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + client().rawKey())
-                                .header("X-Request-ID", "other-project")
+                                .header("Idempotency-Key", "other-project")
                                 .header("X-Labflow-Replay", "true")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body))
@@ -128,7 +128,7 @@ class SdkRunHttpTests {
             mvc.perform(
                             post(path(id) + "/logs")
                                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
-                                    .header("X-Request-ID", "invalid")
+                                    .header("Idempotency-Key", UUID.randomUUID().toString())
                                     .header("X-Labflow-Replay", "true")
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content(jsonMapper.writeValueAsString(payload)))
@@ -193,6 +193,8 @@ class SdkRunHttpTests {
     @Autowired RunSystemMetricRepository systemMetrics;
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired com.dju.labflow.sdk.idempotency.IdempotencyStore ledger;
+    @Autowired com.dju.labflow.run.run.application.RunService runService;
 
     // HTTP 서비스의 실제 커밋/롤백을 보기 위해 테스트 자체는 트랜잭션으로 감싸지 않는다.
     @AfterEach
@@ -209,13 +211,14 @@ class SdkRunHttpTests {
                                             .getResultList();
                             List<Long> ids = runs.stream().map(RunEntity::getId).toList();
                             em.createQuery(
-                                            "delete from SdkRequestEntity r where r.projectId in "
+                                            "delete from IdempotencyRecord r where r.projectId in "
                                                     + "(select p.id from ProjectEntity p where p.createdBy in :ids)")
                                     .setParameter("ids", owners)
                                     .executeUpdate();
                             if (!ids.isEmpty()) {
                                 for (String type :
                                         List.of(
+                                                "RunMetricSummaryEntity",
                                                 "RunParameterEntity",
                                                 "RunMetricEntity",
                                                 "RunLogEntity",
@@ -700,20 +703,38 @@ class SdkRunHttpTests {
     }
 
     @Test
-    void contextPathIsPreservedInCreatedLocation() throws Exception {
+    void contextPathIsPreservedInCreatedLocationAndIdempotentReplay() throws Exception {
         Client client = client();
-        mvc.perform(
-                        post("/labflow" + BASE)
-                                .contextPath("/labflow")
-                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content("{\"name\":\"training\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(
-                        header().string(
-                                        HttpHeaders.LOCATION,
-                                        org.hamcrest.Matchers.startsWith(
-                                                "http://localhost/labflow" + BASE + "/")));
+        MockHttpServletResponse first = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            MockHttpServletResponse result =
+                    mvc.perform(
+                                    post("/labflow" + BASE)
+                                            .contextPath("/labflow")
+                                            .header(
+                                                    HttpHeaders.AUTHORIZATION,
+                                                    "Bearer " + client.rawKey())
+                                            .header("Idempotency-Key", "context-create")
+                                            .contentType(MediaType.APPLICATION_JSON)
+                                            .content("{\"name\":\"training\"}"))
+                            .andExpect(status().isCreated())
+                            .andExpect(
+                                    header().string(
+                                                    HttpHeaders.LOCATION,
+                                                    org.hamcrest.Matchers.startsWith(
+                                                            "http://localhost/labflow"
+                                                                    + BASE
+                                                                    + "/")))
+                            .andReturn()
+                            .getResponse();
+            if (first == null) first = result;
+            else {
+                assertThat(result.getContentAsByteArray()).isEqualTo(first.getContentAsByteArray());
+                assertThat(result.getHeader(HttpHeaders.LOCATION))
+                        .isEqualTo(first.getHeader(HttpHeaders.LOCATION));
+                assertThat(result.getContentType()).isEqualTo(first.getContentType());
+            }
+        }
     }
 
     @Test
@@ -731,26 +752,33 @@ class SdkRunHttpTests {
                         "{\"metadata\":{\"a\":\"1\",\"b\":\"2\"},\"name\":\"dedupe\"}",
                         "create-1")
                 .andExpect(status().isCreated())
-                .andExpect(content().json(first.getContentAsString()))
+                .andExpect(content().bytes(first.getContentAsByteArray()))
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, first.getContentType()))
                 .andExpect(
                         header().string(
                                         HttpHeaders.LOCATION,
                                         first.getHeader(HttpHeaders.LOCATION)));
         identified(client, BASE, "{\"name\":\"different\"}", "create-1")
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
         IssueProjectApiKeyResult secondKey =
                 issuance.issue(
                         client.ownerId(),
                         client.projectId(),
                         new IssueProjectApiKeyCommand("rotated"));
-        identified(
-                        new Client(client.ownerId(), client.projectId(), secondKey.rawApiKey()),
-                        BASE,
-                        firstBody,
-                        "create-1")
-                .andExpect(status().isCreated())
-                .andExpect(content().json(first.getContentAsString()));
+        MockHttpServletResponse rotated =
+                identified(
+                                new Client(
+                                        client.ownerId(),
+                                        client.projectId(),
+                                        secondKey.rawApiKey()),
+                                BASE,
+                                firstBody,
+                                "create-1")
+                        .andExpect(status().isCreated())
+                        .andReturn()
+                        .getResponse();
+        assertThat(rotated.getContentAsString()).isNotEqualTo(first.getContentAsString());
         Client other = client();
         identified(other, BASE, firstBody, "create-1").andExpect(status().isCreated());
     }
@@ -819,7 +847,7 @@ class SdkRunHttpTests {
     }
 
     @Test
-    void failedWriteRollsBackRecordsAndDoesNotConsumeRequestId() throws Exception {
+    void failedWriteRollsBackRecordsAndCorrectedRequestUsesANewKey() throws Exception {
         Client client = client();
         RunId id = create(client);
         write(client, id, "/parameters", "{\"parameters\":{\"optimizer\":\"adam\"}}")
@@ -835,7 +863,7 @@ class SdkRunHttpTests {
                         client,
                         path(id) + "/parameters",
                         "{\"parameters\":{\"new\":\"value\",\"optimizer\":\"adam\"}}",
-                        "rollback-1")
+                        "rollback-corrected")
                 .andExpect(status().isNoContent());
         assertThat(parameters.findByRunId(id)).hasSize(2);
     }
@@ -851,19 +879,17 @@ class SdkRunHttpTests {
         identified(client, path(first) + "/logs", body, "event-a")
                 .andExpect(status().isNoContent());
         identified(client, path(first) + "/logs", body.replace("one", "two"), "Event-A")
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
         identified(client, path(second) + "/logs", body, "Event-A")
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+                .andExpect(status().isNoContent());
         identified(client, path(first) + "/heartbeat", null, "Event-A")
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("REQUEST_ID_CONFLICT"));
+                .andExpect(status().isNoContent());
         Client other = client();
         identified(other, path(first) + "/logs", body, "Event-A").andExpect(status().isForbidden());
         assertThat(logs.findByRunId(first, 100)).hasSize(2);
-        assertThat(logs.findByRunId(second, 100)).isEmpty();
-        for (String invalid : List.of("", " ", "a".repeat(65), "bad/id", "한글")) {
+        assertThat(logs.findByRunId(second, 100)).hasSize(1);
+        for (String invalid : List.of("", " ", "a".repeat(301), "bad id", "한글")) {
             identified(client, path(first) + "/logs", body, invalid)
                     .andExpect(status().isBadRequest());
         }
@@ -880,7 +906,7 @@ class SdkRunHttpTests {
                         () ->
                                 jsonMapper
                                         .readValue(
-                                                identified(
+                                                identifiedEventually(
                                                                 client,
                                                                 BASE,
                                                                 "{\"name\":\"concurrent\"}",
@@ -900,7 +926,7 @@ class SdkRunHttpTests {
             for (int i = 0; i < 8; i++)
                 writes.add(
                         () -> {
-                            identified(
+                            identifiedEventually(
                                             client,
                                             BASE + "/" + id + "/logs",
                                             "{\"message\":\"one\",\"source\":\"USER\",\"level\":\"INFO\"}",
@@ -926,12 +952,164 @@ class SdkRunHttpTests {
         }
     }
 
+    @Test
+    void acceptsThreeHundredCharactersAndExpiresWithoutDeletingBusinessRecords() throws Exception {
+        Client client = client();
+        String key = "k".repeat(300);
+        String first =
+                identified(client, BASE, "{\"name\":\"first\"}", key)
+                        .andExpect(status().isCreated())
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        com.dju.labflow.sdk.idempotency.IdempotencyRecord record =
+                new TransactionTemplate(transactions)
+                        .execute(
+                                status ->
+                                        em.createQuery(
+                                                        "select r from IdempotencyRecord r where r.projectId=:project",
+                                                        com.dju.labflow.sdk.idempotency
+                                                                .IdempotencyRecord.class)
+                                                .setParameter("project", client.projectId().value())
+                                                .getSingleResult());
+        assertThat(java.time.Duration.between(record.getCreatedAt(), record.getExpiresAt()))
+                .isEqualTo(java.time.Duration.ofDays(15));
+        assertThat(record.getScopeHash()).hasSize(64).isNotEqualTo(key);
+        identified(client, BASE, "{\"name\":\"first\"}", key)
+                .andExpect(status().isCreated())
+                .andExpect(content().json(first));
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status ->
+                                em.createQuery(
+                                                "update IdempotencyRecord r set r.expiresAt=:past where r.id=:id")
+                                        .setParameter("past", Instant.now().minusSeconds(1))
+                                        .setParameter("id", record.getId())
+                                        .executeUpdate());
+        String second =
+                identified(client, BASE, "{\"name\":\"new after expiration\"}", key)
+                        .andExpect(status().isCreated())
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        assertThat(second).isNotEqualTo(first);
+        Long count =
+                new TransactionTemplate(transactions)
+                        .execute(
+                                status ->
+                                        em.createQuery(
+                                                        "select count(r) from RunEntity r where r.projectId=:project",
+                                                        Long.class)
+                                                .setParameter("project", client.projectId().value())
+                                                .getSingleResult());
+        assertThat(count).isEqualTo(2L);
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status ->
+                                em.createQuery(
+                                                "update IdempotencyRecord r set r.expiresAt=:past where r.projectId=:project")
+                                        .setParameter("past", Instant.now().minusSeconds(1))
+                                        .setParameter("project", client.projectId().value())
+                                        .executeUpdate());
+        assertThat(ledger.deleteExpired()).isEqualTo(1);
+    }
+
+    @Test
+    void inProgressRequestReturns409AndThenReplaysTheCommittedResponse() throws Exception {
+        Client client = client();
+        String key = "processing-key";
+        ProjectApiKey apiKey = keys.findByKeyHash(hasher.hash(client.rawKey())).orElseThrow();
+        com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal principal =
+                new com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal(
+                        apiKey.getId(), client.projectId(), client.ownerId());
+        String scope =
+                com.dju.labflow.sdk.idempotency.IdempotencyFilter.hash(
+                        jsonMapper.writeValueAsBytes(
+                                List.of(apiKey.getId().value(), "POST", BASE, key)));
+        String fingerprint =
+                com.dju.labflow.sdk.idempotency.IdempotencyFilter.hash(
+                        jsonMapper.writeValueAsBytes(
+                                List.of(Map.of(), Map.of("name", "processing"))));
+        com.dju.labflow.sdk.idempotency.IdempotencyStore.Claim claim =
+                ledger.claim(principal, scope, fingerprint);
+        identified(client, BASE, "{\"name\":\"processing\"}", key)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENT_REQUEST_PROCESSING"))
+                .andExpect(header().string("Retry-After", "1"));
+        String[] body = {null};
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status -> {
+                            projects.findByIdForUpdate(client.projectId()).orElseThrow();
+                            ledger.lock(claim);
+                            RunId id =
+                                    runService.create(
+                                            principal,
+                                            new com.dju.labflow.run.run.application
+                                                    .RunCreateCommand("processing", Map.of()));
+                            body[0] = jsonMapper.writeValueAsString(RunCreateResponse.from(id));
+                            ledger.complete(
+                                    claim,
+                                    new com.dju.labflow.sdk.idempotency.IdempotencyStore.Response(
+                                            201,
+                                            jsonMapper.writeValueAsString(
+                                                    Map.of(
+                                                            "Location",
+                                                            "http://localhost"
+                                                                    + BASE
+                                                                    + "/"
+                                                                    + id.value(),
+                                                            "Content-Type",
+                                                            "application/json")),
+                                            body[0],
+                                            null));
+                        });
+        identified(client, BASE, "{\"name\":\"processing\"}", key)
+                .andExpect(status().isCreated())
+                .andExpect(content().json(body[0]));
+    }
+
+    @Test
+    void rejectsLegacyHeaderAndIgnoresKeysOnGet() throws Exception {
+        Client client = client();
+        mvc.perform(
+                        post(BASE)
+                                .header("Authorization", "Bearer " + client.rawKey())
+                                .header("X-Request-ID", "old")
+                                .contentType("application/json")
+                                .content("{\"name\":\"not-created\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_IDEMPOTENCY_KEY"));
+        identified(client, BASE, "{\"name\":\"too long\"}", "a".repeat(301))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_IDEMPOTENCY_KEY"));
+        RunId id = create(client);
+        mvc.perform(
+                        get(path(id))
+                                .header("Authorization", "Bearer " + client.rawKey())
+                                .header("Idempotency-Key", "a".repeat(301)))
+                .andExpect(status().isOk());
+    }
+
+    private ResultActions identifiedEventually(Client client, String path, String body, String key)
+            throws Exception {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            ResultActions result = identified(client, path, body, key);
+            MockHttpServletResponse response = result.andReturn().getResponse();
+            if (response.getStatus() != 409
+                    || !response.getContentAsString().contains("IDEMPOTENT_REQUEST_PROCESSING"))
+                return result;
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Idempotent request did not finish");
+    }
+
     private ResultActions identified(Client client, String path, String body, String requestId)
             throws Exception {
         MockHttpServletRequestBuilder request =
                 request(path.endsWith("/parameters") ? HttpMethod.PUT : HttpMethod.POST, path)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + client.rawKey())
-                        .header("X-Request-ID", requestId);
+                        .header("Idempotency-Key", requestId);
         if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
         return mvc.perform(request);
     }

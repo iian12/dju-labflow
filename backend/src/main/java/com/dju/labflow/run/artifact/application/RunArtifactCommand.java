@@ -13,5 +13,4 @@ public record RunArtifactCommand(
         @NotBlank @Size(max = 255) String bucket,
         @NotBlank @Size(max = 512) String objectKey,
         @PositiveOrZero Long step,
-        @NotBlank @Size(max = 64) String clientRequestId,
         @NotNull Instant uploadExpiresAt) {}

@@ -21,7 +21,6 @@ public final class RunArtifactMapper {
                 .objectKey(artifact.getObjectKey())
                 .status(artifact.getStatus())
                 .step(artifact.getStep())
-                .clientRequestId(artifact.getClientRequestId())
                 .createdAt(artifact.getCreatedAt())
                 .uploadExpiresAt(artifact.getUploadExpiresAt())
                 .uploadedAt(artifact.getUploadedAt())
@@ -42,7 +41,6 @@ public final class RunArtifactMapper {
                 entity.getObjectKey(),
                 entity.getStatus(),
                 entity.getStep(),
-                entity.getClientRequestId(),
                 entity.getCreatedAt(),
                 entity.getUploadExpiresAt(),
                 entity.getUploadedAt(),

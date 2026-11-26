@@ -76,7 +76,7 @@ def init(
     spool_directory: str | Path | None = None,
     spool_retention_days: float = 7.0,
     spool_max_bytes: int = 100 * 1024 * 1024,
-    request_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> Run:
     previous = _context.current.get()
     if (
@@ -101,7 +101,7 @@ def init(
         spool_max_bytes=spool_max_bytes,
     )
     try:
-        run = client.start_run(name, metadata=metadata, request_id=request_id)
+        run = client.start_run(name, metadata=metadata, idempotency_key=idempotency_key)
     except BaseException:
         client.close()
         raise
@@ -110,9 +110,9 @@ def init(
     return run
 
 
-def artifact(path: str | Path, *, kind: str = "OTHER", request_id: str | None = None) -> int:
+def artifact(path: str | Path, *, kind: str = "OTHER", idempotency_key: str | None = None) -> int:
     """Upload a file to the active run and return its artifact ID."""
-    return current_run().upload_artifact(path, kind=kind, request_id=request_id)
+    return current_run().upload_artifact(path, kind=kind, idempotency_key=idempotency_key)
 
 
 upload_artifact = artifact
@@ -122,8 +122,8 @@ def download_artifact(artifact_id: int, destination: str | Path) -> Path:
     return current_run().download_artifact(artifact_id, destination)
 
 
-def params(parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
-    current_run().params(parameters, request_id=request_id)
+def params(parameters: Mapping[str, Scalar], *, idempotency_key: str | None = None) -> None:
+    current_run().params(parameters, idempotency_key=idempotency_key)
 
 
 def metric(
@@ -133,7 +133,7 @@ def metric(
     epoch: int | None = None,
     elapsed_time: float | None = None,
     recorded_at: datetime | None = None,
-    request_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> None:
     current_run().metric(
         values,
@@ -141,7 +141,7 @@ def metric(
         epoch=epoch,
         elapsed_time=elapsed_time,
         recorded_at=recorded_at,
-        request_id=request_id,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -151,10 +151,14 @@ def log(
     level: str = "INFO",
     source: str = "USER",
     recorded_at: datetime | None = None,
-    request_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> None:
     current_run().log(
-        message, level=level, source=source, recorded_at=recorded_at, request_id=request_id
+        message,
+        level=level,
+        source=source,
+        recorded_at=recorded_at,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -164,18 +168,20 @@ def text(
     *,
     step: int | None = None,
     recorded_at: datetime | None = None,
-    request_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> None:
-    current_run().text(key, value, step=step, recorded_at=recorded_at, request_id=request_id)
+    current_run().text(
+        key, value, step=step, recorded_at=recorded_at, idempotency_key=idempotency_key
+    )
 
 
-def finish(*, request_id: str | None = None) -> None:
-    current_run().finish(request_id=request_id)
+def finish(*, idempotency_key: str | None = None) -> None:
+    current_run().finish(idempotency_key=idempotency_key)
 
 
-def fail(error: str, *, request_id: str | None = None) -> None:
-    current_run().fail(error, request_id=request_id)
+def fail(error: str, *, idempotency_key: str | None = None) -> None:
+    current_run().fail(error, idempotency_key=idempotency_key)
 
 
-def heartbeat(*, request_id: str | None = None) -> None:
-    current_run().heartbeat(request_id=request_id)
+def heartbeat(*, idempotency_key: str | None = None) -> None:
+    current_run().heartbeat(idempotency_key=idempotency_key)

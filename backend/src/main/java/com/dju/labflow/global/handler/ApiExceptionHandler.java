@@ -8,7 +8,7 @@ import com.dju.labflow.project.project.exception.ProjectNotFoundException;
 import com.dju.labflow.project.project.exception.ProjectVersionConflictException;
 import com.dju.labflow.run.run.exception.RunNotFoundException;
 import com.dju.labflow.run.run.exception.RunStateConflictException;
-import com.dju.labflow.sdk.request.domain.RequestIdConflictException;
+import com.dju.labflow.sdk.idempotency.IdempotencyException;
 import com.dju.labflow.user.exception.DuplicateEmailException;
 import com.dju.labflow.user.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -24,6 +24,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -33,13 +34,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 /** MVC와 서비스의 예상 가능한 실패를 일관된 HTTP 상태/오류 본문으로 변환한다. */
 @RestControllerAdvice
 public class ApiExceptionHandler {
-    @ExceptionHandler(RequestIdConflictException.class)
-    public ResponseEntity<SecurityErrorResponse> requestIdConflict(
-            RequestIdConflictException exception) {
-        return error(
-                HttpStatus.CONFLICT,
-                "REQUEST_ID_CONFLICT",
-                "requestId was already used for a different request");
+    @ExceptionHandler(IdempotencyException.class)
+    public ResponseEntity<SecurityErrorResponse> idempotencyConflict(
+            IdempotencyException exception) {
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(exception.status());
+        if (exception.status() == 409 && exception.code().equals("IDEMPOTENT_REQUEST_PROCESSING"))
+            response.header("Retry-After", "1");
+        return response.body(new SecurityErrorResponse(exception.code(), exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -115,7 +116,8 @@ public class ApiExceptionHandler {
     @ExceptionHandler({
         HttpMessageNotReadableException.class,
         MethodArgumentTypeMismatchException.class,
-        MissingServletRequestParameterException.class
+        MissingServletRequestParameterException.class,
+        MissingRequestHeaderException.class
     })
     public ResponseEntity<SecurityErrorResponse> malformedRequest(Exception exception) {
         // 파서 예외에는 입력 원문이 들어갈 수 있으므로 그대로 반환하지 않는다.

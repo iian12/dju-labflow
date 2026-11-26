@@ -136,7 +136,7 @@ class MariaDbMigrationIntegrationTests {
         String url = database();
         try (ConfigurableApplicationContext context = application(url)) {
             Flyway flyway = context.getBean(Flyway.class);
-            assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+            assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             SchemaVerifier.verify(url, "root", PASSWORD);
             PersistentRequestLimiter limiter = context.getBean(PersistentRequestLimiter.class);
@@ -338,7 +338,7 @@ class MariaDbMigrationIntegrationTests {
             }
             connection.commit();
         }
-        assertThat(flyway(url).migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway(url).migrate().migrationsExecuted).isEqualTo(2);
         String original =
                 "select id from (select id,run_id,metric_key,row_number() over (partition by run_id,metric_key order by recorded_at desc,id desc) rn from run_metric_entity where run_id between 100 and 119) ranked where rn=1 order by run_id,metric_key";
         String projected =
@@ -489,6 +489,150 @@ class MariaDbMigrationIntegrationTests {
             while (rows.next()) rows.getLong(1);
         }
         return (System.nanoTime() - start) / 1_000_000.0;
+    }
+
+    @Test
+    void idempotencyLedgerUsesNowaitRecoveryAndKeepsArtifactDataDuringUpgrade() throws Exception {
+        String url = database();
+        Flyway.configure()
+                .dataSource(url, "root", PASSWORD)
+                .locations("classpath:db/migration")
+                .target("2")
+                .load()
+                .migrate();
+        try (Connection connection = connect(url);
+                Statement statement = connection.createStatement()) {
+            statement.executeUpdate(
+                    "insert into project_entity(id,version,name,created_by,visibility,created_at) values(1,0,'ledger-test',1,'PUBLIC',current_timestamp(6))");
+            statement.executeUpdate(
+                    "insert into project_api_key_entity(id,version,project_id,created_by,name,key_prefix,key_hash,status,created_at) values(1,0,1,1,'key','prefix','hash','ACTIVE',current_timestamp(6))");
+            statement.executeUpdate(
+                    "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) values(1,1,'old-key','old-payload',1,current_timestamp(6))");
+            statement.executeUpdate(
+                    "insert into run_artifact_entity(id,version,run_id,name,kind,content_type,expected_size_bytes,size_bytes,bucket,object_key,status,client_request_id,created_at,upload_expires_at,uploaded_at) values(1,0,1,'preserved.bin','OTHER','application/octet-stream',10,10,'files','preserved-object','READY','old-artifact-key',current_timestamp(6),current_timestamp(6),current_timestamp(6))");
+        }
+        assertThat(flyway(url).migrate().migrationsExecuted).isEqualTo(1);
+        try (Connection connection = connect(url);
+                Statement statement = connection.createStatement();
+                ResultSet result =
+                        statement.executeQuery(
+                                "select name,size_bytes,object_key from run_artifact_entity where id=1")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("preserved.bin");
+            assertThat(result.getLong(2)).isEqualTo(10);
+            assertThat(result.getString(3)).isEqualTo("preserved-object");
+            try (ResultSet columns =
+                    connection
+                            .getMetaData()
+                            .getColumns(
+                                    connection.getCatalog(),
+                                    null,
+                                    "run_artifact_entity",
+                                    "client_request_id")) {
+                assertThat(columns.next()).isFalse();
+            }
+            try (ResultSet tables =
+                    connection
+                            .getMetaData()
+                            .getTables(connection.getCatalog(), null, "sdk_request_entity", null)) {
+                assertThat(tables.next()).isFalse();
+            }
+        }
+        try (ConfigurableApplicationContext context = application(url)) {
+            com.dju.labflow.sdk.idempotency.IdempotencyStore ledger =
+                    context.getBean(com.dju.labflow.sdk.idempotency.IdempotencyStore.class);
+            PlatformTransactionManager manager = context.getBean(PlatformTransactionManager.class);
+            ProjectApiKeyPrincipal principal =
+                    new ProjectApiKeyPrincipal(
+                            ProjectApiKeyId.of(1L), ProjectId.of(1L), UserId.of(1L));
+            String scope = "a".repeat(64), fingerprint = "b".repeat(64);
+            com.dju.labflow.sdk.idempotency.IdempotencyStore.Claim claim =
+                    ledger.claim(principal, scope, fingerprint);
+            try (Connection connection = connect(url);
+                    Statement statement = connection.createStatement()) {
+                statement.executeUpdate(
+                        "update idempotency_request set processing_until=utc_timestamp(6)-interval 1 second where scope_hash='"
+                                + scope
+                                + "'");
+            }
+            CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
+            try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+                Future<?> owner =
+                        executor.submit(
+                                () ->
+                                        new TransactionTemplate(manager)
+                                                .executeWithoutResult(
+                                                        status -> {
+                                                            ledger.lock(claim);
+                                                            locked.countDown();
+                                                            try {
+                                                                if (!release.await(
+                                                                        10, TimeUnit.SECONDS))
+                                                                    throw new AssertionError(
+                                                                            "Owner not released");
+                                                            } catch (
+                                                                    InterruptedException
+                                                                            interrupted) {
+                                                                Thread.currentThread().interrupt();
+                                                                throw new IllegalStateException(
+                                                                        interrupted);
+                                                            }
+                                                            status.setRollbackOnly();
+                                                        }));
+                try {
+                    assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                    long started = System.nanoTime();
+                    assertThatThrownBy(() -> ledger.claim(principal, scope, fingerprint))
+                            .isInstanceOf(
+                                    com.dju.labflow.sdk.idempotency.IdempotencyException.class)
+                            .satisfies(
+                                    error ->
+                                            assertThat(
+                                                            ((com.dju.labflow.sdk.idempotency
+                                                                                    .IdempotencyException)
+                                                                            error)
+                                                                    .status())
+                                                    .isEqualTo(409));
+                    assertThat(Duration.ofNanos(System.nanoTime() - started))
+                            .isLessThan(Duration.ofSeconds(2));
+                } finally {
+                    release.countDown();
+                }
+                owner.get(5, TimeUnit.SECONDS);
+            }
+            com.dju.labflow.sdk.idempotency.IdempotencyStore.Claim recovered =
+                    ledger.claim(principal, scope, fingerprint);
+            assertThat(recovered.ownerToken()).isEqualTo(claim.ownerToken());
+            assertThat(recovered.replay()).isFalse();
+            new TransactionTemplate(manager)
+                    .executeWithoutResult(
+                            status -> {
+                                ledger.lock(recovered);
+                                ledger.complete(
+                                        recovered,
+                                        new com.dju.labflow.sdk.idempotency.IdempotencyStore
+                                                .Response(
+                                                201,
+                                                "{\"Content-Type\":\"application/json\"}",
+                                                "{\"runId\":123}",
+                                                null));
+                            });
+            com.dju.labflow.sdk.idempotency.IdempotencyStore.Claim replay =
+                    ledger.claim(principal, scope, fingerprint);
+            assertThat(replay.replay()).isTrue();
+            assertThat(replay.response().body()).isEqualTo("{\"runId\":123}");
+            assertThatThrownBy(() -> ledger.claim(principal, scope, "c".repeat(64)))
+                    .isInstanceOf(com.dju.labflow.sdk.idempotency.IdempotencyException.class)
+                    .satisfies(
+                            error ->
+                                    assertThat(
+                                                    ((com.dju.labflow.sdk.idempotency
+                                                                            .IdempotencyException)
+                                                                    error)
+                                                            .status())
+                                            .isEqualTo(422));
+            SchemaVerifier.verify(url, "root", PASSWORD);
+        }
     }
 
     private ConfigurableApplicationContext application(String url) {

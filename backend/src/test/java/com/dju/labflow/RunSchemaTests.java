@@ -22,28 +22,39 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 /** 배포 DDL의 기본 문법과 키 제약을 격리된 H2 MariaDB 모드에서 검사한다. */
 class RunSchemaTests {
     @Test
-    void sdkRequestMigrationIsRepeatableAndScopesIdentityToProject() throws Exception {
-        try (Connection connection =
-                DriverManager.getConnection("jdbc:h2:mem:sdk-request-ddl;MODE=MariaDB", "sa", "")) {
-            FileSystemResource migration = new FileSystemResource("database/sdk-requests.sql");
-            ScriptUtils.executeSqlScript(connection, migration);
-            ScriptUtils.executeSqlScript(connection, migration);
-            try (Statement statement = connection.createStatement()) {
-                statement.executeUpdate(
-                        "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
-                                + "values(1,1,'key','hash',1,current_timestamp)");
-                assertThatThrownBy(
-                                () ->
-                                        statement.executeUpdate(
-                                                "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
-                                                        + "values(2,1,'key','hash',1,current_timestamp)"))
-                        .isInstanceOf(SQLException.class);
-                assertThat(
-                                statement.executeUpdate(
-                                        "insert into sdk_request_entity(id,project_id,request_key,fingerprint,result_run_id,created_at) "
-                                                + "values(2,2,'key','hash',2,current_timestamp)"))
-                        .isEqualTo(1);
+    void currentSchemaUsesOnlyTheResponseLedgerForIdempotency() throws Exception {
+        String url = "jdbc:h2:mem:idempotency-ddl;MODE=MariaDB;DB_CLOSE_DELAY=-1";
+        org.flywaydb.core.Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+                Statement statement = connection.createStatement()) {
+            try (ResultSet columns =
+                    connection
+                            .getMetaData()
+                            .getColumns(
+                                    null, "PUBLIC", "RUN_ARTIFACT_ENTITY", "CLIENT_REQUEST_ID")) {
+                assertThat(columns.next()).isFalse();
             }
+            try (ResultSet tables =
+                    connection
+                            .getMetaData()
+                            .getTables(null, "PUBLIC", "SDK_REQUEST_ENTITY", null)) {
+                assertThat(tables.next()).isFalse();
+            }
+            statement.executeUpdate(
+                    "insert into project_entity(id,version,name,created_by,visibility,created_at) values(1,0,'p',1,'PUBLIC',current_timestamp)");
+            statement.executeUpdate(
+                    "insert into project_api_key_entity(id,version,project_id,created_by,name,key_prefix,key_hash,status,created_at) values(1,0,1,1,'key','prefix','hash','ACTIVE',current_timestamp)");
+            String insert =
+                    "insert into idempotency_request(id,project_id,api_key_id,scope_hash,fingerprint,owner_token,state,created_at,expires_at,processing_until) values(%d,1,1,'%s','fingerprint','owner','PROCESSING',current_timestamp,dateadd('DAY',15,current_timestamp),dateadd('MINUTE',2,current_timestamp))";
+            statement.executeUpdate(insert.formatted(1, "scope"));
+            assertThatThrownBy(() -> statement.executeUpdate(insert.formatted(2, "scope")))
+                    .isInstanceOf(SQLException.class);
+            assertThat(statement.executeUpdate(insert.formatted(3, "different-scope")))
+                    .isEqualTo(1);
         }
     }
 
@@ -139,28 +150,27 @@ class RunSchemaTests {
     }
 
     @Test
-    void deploymentArtifactDdlEnforcesRequestAndStorageIdentityWithoutUniqueFileNames()
-            throws Exception {
+    void deploymentArtifactDdlEnforcesOnlyStorageIdentityWithoutRequestKeys() throws Exception {
         try (Connection connection =
                 DriverManager.getConnection("jdbc:h2:mem:artifact-ddl;MODE=MariaDB", "sa", "")) {
-            ScriptUtils.executeSqlScript(connection, new FileSystemResource("database/runs.sql"));
+            org.flywaydb.core.Flyway.configure()
+                    .dataSource("jdbc:h2:mem:artifact-ddl;MODE=MariaDB", "sa", "")
+                    .locations("classpath:db/migration")
+                    .load()
+                    .migrate();
             try (PreparedStatement insert =
                     connection.prepareStatement(
                             "insert into run_artifact_entity(id,version,run_id,name,kind,content_type,"
-                                    + "expected_size_bytes,bucket,object_key,status,client_request_id,created_at,upload_expires_at) "
+                                    + "expected_size_bytes,bucket,object_key,status,created_at,upload_expires_at) "
                                     + "values(?,0,?,'model.pt','MODEL','application/octet-stream',10,'files',?,"
-                                    + "'UPLOADING',?,current_timestamp,dateadd('HOUR',1,current_timestamp))")) {
+                                    + "'UPLOADING',current_timestamp,dateadd('HOUR',1,current_timestamp))")) {
                 insert.setLong(1, 1L);
                 insert.setLong(2, 1L);
                 insert.setString(3, "object-1");
-                insert.setString(4, "request-1");
                 insert.executeUpdate();
 
                 insert.setLong(1, 2L);
                 insert.setString(3, "object-2");
-                assertThatThrownBy(insert::executeUpdate).isInstanceOf(SQLException.class);
-
-                insert.setString(4, "request-2");
                 assertThat(insert.executeUpdate()).isEqualTo(1);
 
                 insert.setLong(1, 3L);

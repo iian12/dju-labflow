@@ -66,7 +66,12 @@ test('server pages bound summary reads and preserve selections across search, so
     await page.getByLabel('정렬', { exact: true }).selectOption('high');
     await page.getByRole('link', { name: 'run-060', exact: true }).waitFor();
     assert.equal(lists.at(-1)!.searchParams.get('metricKey'), 'off_page_score');
+    const comparisonSummary = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith('/summaries') && url.searchParams.get('runIds') === '1,21' && response.ok();
+    });
     await page.getByRole('button', { name: '결과 비교 →' }).click();
+    await comparisonSummary;
     await page.getByLabel('기준 Run', { exact: true }).waitFor();
     assert.equal(lists.at(-1)!.searchParams.get('runIds'), '1,21');
     assert.ok(batches.every(ids => ids.length <= 20));

@@ -5,6 +5,7 @@ import com.dju.labflow.run.artifact.application.LocalArtifactService;
 import com.dju.labflow.run.artifact.domain.ArtifactKind;
 import com.dju.labflow.run.artifact.domain.RunArtifact;
 import com.dju.labflow.run.run.domain.RunId;
+import com.dju.labflow.sdk.idempotency.*;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.Map;
@@ -28,7 +29,7 @@ public class SdkArtifactController {
             @PathVariable long runId,
             @RequestParam String name,
             @RequestParam(defaultValue = "OTHER") ArtifactKind kind,
-            @RequestHeader("X-Request-ID") String requestId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             HttpServletRequest request)
             throws IOException {
         RunArtifact artifact =
@@ -37,7 +38,7 @@ public class SdkArtifactController {
                         RunId.of(runId),
                         name,
                         kind,
-                        requestId,
+                        (IdempotencyStore.Claim) request.getAttribute(IdempotencyFilter.CLAIM),
                         request.getContentLengthLong(),
                         request.getInputStream());
         return ResponseEntity.status(201).body(Map.of("artifactId", artifact.getId().value()));

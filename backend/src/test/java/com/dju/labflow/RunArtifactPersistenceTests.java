@@ -54,8 +54,6 @@ class RunArtifactPersistenceTests {
         assertThat(artifacts.findByRunId(RunId.of(701L), 1))
                 .extracting(RunArtifact::getId)
                 .containsExactly(pending.getId());
-        assertThat(artifacts.findByRunIdAndClientRequestId(RunId.of(701L), "req-1")).isPresent();
-        assertThat(artifacts.findByRunIdAndClientRequestId(RunId.of(702L), "req-1")).isEmpty();
         assertThatThrownBy(() -> artifacts.findByRunId(RunId.of(701L), 1001))
                 .isInstanceOf(InvalidDataAccessApiUsageException.class);
     }
@@ -74,15 +72,11 @@ class RunArtifactPersistenceTests {
     }
 
     @Test
-    void rejectsDuplicateRequestIdsWithinOneRun() {
-        artifacts.save(artifact(7021L, 701L, "same-request", "object-1"));
+    void artifactsDoNotStoreRequestKeysAndAllowIndependentStorageObjects() {
+        artifacts.save(artifact(7021L, 701L, "first", "object-1"));
+        artifacts.save(artifact(7022L, 701L, "second", "object-2"));
         em.flush();
-        assertThatThrownBy(
-                        () -> {
-                            artifacts.save(artifact(7022L, 701L, "same-request", "object-2"));
-                            em.flush();
-                        })
-                .isInstanceOf(RuntimeException.class);
+        assertThat(artifacts.findByRunId(RunId.of(701L), 100)).hasSize(2);
     }
 
     @Test
@@ -127,7 +121,6 @@ class RunArtifactPersistenceTests {
                 "files",
                 objectKey,
                 10L,
-                requestId,
                 NOW,
                 NOW.plusSeconds(3600));
     }

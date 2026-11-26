@@ -15,9 +15,9 @@ with tempfile.TemporaryDirectory(prefix='labflow-deployment-') as temp:
                 timeout=30, max_retries=1) as client:
         run = client.start_run('External deployment smoke', metadata={'source': 'external Windows PC'})
         run.params({'batch_size': 32, 'optimizer': 'adam'})
-        request_id = str(uuid4())
+        idempotency_key = str(uuid4())
         for _ in range(2):
-            run.metric({'loss': 0.125, 'accuracy': 0.95}, step=1, elapsed_time=1.0, request_id=request_id)
+            run.metric({'loss': 0.125, 'accuracy': 0.95}, step=1, elapsed_time=1.0, idempotency_key=idempotency_key)
         run.log('External SDK round-trip log')
         run.text('prediction', '외부 SDK에서 전송한 텍스트', step=1)
         run.heartbeat()

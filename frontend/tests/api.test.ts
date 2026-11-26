@@ -167,10 +167,10 @@ test('file uploads send binary content and a stable request ID; downloads retain
   const file = new File(['binary\u0000payload'], 'weights.bin', { type: 'application/octet-stream' })
   let sent: RequestInit | undefined
   const upload = (async (_path: string, init: RequestInit) => { sent = init; return new Response('{"artifactId":9223372036854775807}', { status: 201 }) }) as typeof fetch
-  const result = await requestApi(endpoint('artifact-upload'), { path: '/api/v1/sdk/runs/1/artifacts?name=weights.bin&kind=MODEL' }, { ...options(upload), file, requestId: 'stable-upload' })
+  const result = await requestApi(endpoint('artifact-upload'), { path: '/api/v1/sdk/runs/1/artifacts?name=weights.bin&kind=MODEL' }, { ...options(upload), file, idempotencyKey: 'stable-upload' })
   assert.equal(sent!.body, file)
   assert.equal((sent!.headers as Record<string, string>)['Content-Type'], 'application/octet-stream')
-  assert.equal((sent!.headers as Record<string, string>)['X-Request-ID'], 'stable-upload')
+  assert.equal((sent!.headers as Record<string, string>)['Idempotency-Key'], 'stable-upload')
   assert.equal(object(result.data)?.artifactId, '9223372036854775807')
   let downloaded: Blob | undefined, name = ''
   const download = (async () => new Response(file, { headers: { 'Content-Disposition': "attachment; filename*=UTF-8''%ED%95%99%EC%8A%B5.bin" } })) as typeof fetch

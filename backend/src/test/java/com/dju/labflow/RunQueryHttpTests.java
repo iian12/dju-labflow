@@ -118,7 +118,6 @@ class RunQueryHttpTests {
     @Autowired RunService runs;
     @Autowired RunRecordService records;
     @Autowired com.dju.labflow.run.run.domain.repository.RunSummaryRepository summaries;
-    @Autowired com.dju.labflow.sdk.request.application.SdkRequestService requests;
     @Autowired AccessTokenProvider tokens;
     @Autowired EntityManager em;
     @Autowired PlatformTransactionManager transactions;
@@ -646,31 +645,28 @@ class RunQueryHttpTests {
     }
 
     @Test
-    void failedSummaryWriteRollsBackMetricsAndRequestIdentityAndAllowsRetry() {
+    void failedSummaryWriteRollsBackAndReplaysTheFirstFailure() throws Exception {
         Fixture f = fixture(ProjectVisibility.PUBLIC);
-        String requestId = "summary-rollback";
-        RunMetricCommand command =
-                new RunMetricCommand(null, 777777L, null, Map.of("loss", 0.5), null);
+        String body = "{\"step\":777777,\"metrics\":{\"loss\":0.5}}";
+        String route = "/api/v1/sdk/runs/" + f.run().value() + "/metrics";
         new TransactionTemplate(transactions)
                 .executeWithoutResult(
                         status ->
                                 em.createNativeQuery(
                                                 "alter table run_metric_summary add constraint test_summary_failure check (max_step <> 777777)")
                                         .executeUpdate());
+        MockHttpServletResponse failed;
         try {
-            assertThatThrownBy(
-                            () ->
-                                    requests.execute(
-                                            f.principal(),
-                                            requestId,
-                                            "metrics",
-                                            f.run(),
-                                            command,
-                                            () -> {
-                                                records.metrics(f.principal(), f.run(), command);
-                                                return f.run();
-                                            }))
-                    .isInstanceOf(RuntimeException.class);
+            failed =
+                    mvc.perform(
+                                    post(route)
+                                            .header("Authorization", "Bearer " + f.key())
+                                            .header("Idempotency-Key", "summary-failure")
+                                            .contentType("application/json")
+                                            .content(body))
+                            .andExpect(status().isConflict())
+                            .andReturn()
+                            .getResponse();
             assertThat(metricCount(f)).isZero();
             assertThat(
                             summaries
@@ -686,17 +682,23 @@ class RunQueryHttpTests {
                                                     "alter table run_metric_summary drop constraint test_summary_failure")
                                             .executeUpdate());
         }
-        for (int attempt = 0; attempt < 2; attempt++)
-            requests.execute(
-                    f.principal(),
-                    requestId,
-                    "metrics",
-                    f.run(),
-                    command,
-                    () -> {
-                        records.metrics(f.principal(), f.run(), command);
-                        return f.run();
-                    });
+        mvc.perform(
+                        post(route)
+                                .header("Authorization", "Bearer " + f.key())
+                                .header("Idempotency-Key", "summary-failure")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(content().json(failed.getContentAsString()));
+        assertThat(metricCount(f)).isZero();
+        for (int i = 0; i < 2; i++)
+            mvc.perform(
+                            post(route)
+                                    .header("Authorization", "Bearer " + f.key())
+                                    .header("Idempotency-Key", "confirmed-rollback-new-operation")
+                                    .contentType("application/json")
+                                    .content(body))
+                    .andExpect(status().isNoContent());
         assertThat(metricCount(f)).isEqualTo(1L);
         assertSummaryMatchesHistory(f);
     }

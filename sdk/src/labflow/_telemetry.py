@@ -377,7 +377,7 @@ class Telemetry:
             "POST",
             log.path,
             body=log.body,
-            request_id=log.request_id,
+            idempotency_key=log.idempotency_key,
             _http=self._http,
             _cancel=self.abandoned,
         )

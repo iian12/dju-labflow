@@ -59,8 +59,15 @@ def test_records_and_automatic_completion(settings, client, tmp_path):
         labflow.text("empty", "")
         source = tmp_path / "가중치.bin"
         source.write_bytes(bytes(range(256)) * 1025)
-        artifact = labflow.artifact(source, kind="MODEL", request_id="weights")
-        assert run.upload_artifact(source, kind="MODEL", request_id="weights") == artifact
+        artifact = labflow.artifact(source, kind="MODEL", idempotency_key="weights")
+        assert run.upload_artifact(source, kind="MODEL", idempotency_key="weights") == artifact
+        original = source.read_bytes()
+        source.write_bytes(b"x" * len(original))
+        with pytest.raises(ConflictError) as conflict:
+            run.upload_artifact(source, kind="MODEL", idempotency_key="weights")
+        assert conflict.value.status_code == 422
+        assert conflict.value.code == "IDEMPOTENCY_KEY_REUSED"
+        source.write_bytes(original)
         destination = tmp_path / "download.bin"
     assert (
         client.download_artifact(run.id, artifact, destination).read_bytes() == source.read_bytes()
@@ -176,14 +183,14 @@ def test_automatic_telemetry(settings, client):
             "recordedAt": status["startedAt"],
         },
     )
-    assert client._spool.save([pending]) == {pending.request_id}
+    assert client._spool.save([pending]) == {pending.idempotency_key}
     assert client.replay_pending()["sent"] == 1
     # Losing the replay acknowledgement also remains idempotent on the actual backend.
     client._spool.save([pending])
     assert client.replay_pending()["sent"] == 1
 
 
-def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
+def test_idempotent_writes_after_lost_http_acknowledgment(settings, client, tmp_path):
     url, key, _ = settings
 
     class LoseAcknowledgment(httpx.BaseTransport):
@@ -193,8 +200,8 @@ def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
             self.attempts = []
 
         def handle_request(self, request):
-            identity = request.headers.get("X-Request-ID")
-            self.attempts.append((identity, request.content))
+            identity = request.headers.get("Idempotency-Key")
+            self.attempts.append((identity, request.read()))
             response = self.inner.handle_request(request)
             if identity and response.status_code < 400 and identity not in self.lost:
                 self.lost.add(identity)
@@ -218,17 +225,23 @@ def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
         heartbeat_interval=None,
     ) as connection:
         create_id, metric_id, log_id = (str(uuid4()) for _ in range(3))
-        with connection.start_run("python-sdk-idempotent", request_id=create_id) as run:
-            assert connection.start_run("python-sdk-idempotent", request_id=create_id) is run
+        with connection.start_run("python-sdk-idempotent", idempotency_key=create_id) as run:
+            assert connection.start_run("python-sdk-idempotent", idempotency_key=create_id) is run
             run.params({"seed": 42})
             run.metric(
-                {"loss": 0.125, "accuracy": 0.9}, step=1, elapsed_time=1.0, request_id=metric_id
+                {"loss": 0.125, "accuracy": 0.9},
+                step=1,
+                elapsed_time=1.0,
+                idempotency_key=metric_id,
             )
             run.metric(
-                {"loss": 0.125, "accuracy": 0.9}, step=1, elapsed_time=1.0, request_id=metric_id
+                {"loss": 0.125, "accuracy": 0.9},
+                step=1,
+                elapsed_time=1.0,
+                idempotency_key=metric_id,
             )
-            run.log("persist exactly once", request_id=log_id)
-            run.log("persist exactly once", request_id=log_id)
+            run.log("persist exactly once", idempotency_key=log_id)
+            run.log("persist exactly once", idempotency_key=log_id)
             run.text("prediction", "cat")
             connection._request(
                 "POST",
@@ -239,14 +252,18 @@ def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
                 },
             )
             run.heartbeat()
+            source = tmp_path / "lost-ack.bin"
+            source.write_bytes(bytes(range(256)) * 1024)
+            artifact_id = run.upload_artifact(source, idempotency_key="lost-artifact-ack")
+            assert artifact_id == run.upload_artifact(source, idempotency_key="lost-artifact-ack")
             with pytest.raises(ConflictError) as error:
-                run.log("different content", request_id=log_id)
-            assert error.value.code == "REQUEST_ID_CONFLICT"
+                run.log("different content", idempotency_key=log_id)
+            assert error.value.code == "IDEMPOTENCY_KEY_REUSED"
         # Successful replays still work after the Run has reached a terminal state.
         connection._request(
             "POST",
             f"{run._path}/logs",
-            request_id=log_id,
+            idempotency_key=log_id,
             body={"message": "persist exactly once", "source": "USER", "level": "INFO"},
         )
         failed = connection.start_run("python-sdk-idempotent-failed")
@@ -254,10 +271,12 @@ def test_idempotent_writes_after_lost_http_acknowledgment(settings, client):
         assert failed.state == "FAILED"
     assert client.get_run(run.id)["status"] == "COMPLETED"
     assert client.get_run(failed.id)["status"] == "FAILED"
-    assert len(transport.lost) == 10
+    assert len(transport.lost) == 11
     for identity in transport.lost:
-        attempts = [body for request_id, body in transport.attempts if request_id == identity]
-        # One intentional 409 sends different content for the already used log identity.
+        attempts = [
+            body for idempotency_key, body in transport.attempts if idempotency_key == identity
+        ]
+        # One intentional 422 sends different content for the already used log identity.
         if identity == log_id:
             assert attempts[0] == attempts[1]
         else:

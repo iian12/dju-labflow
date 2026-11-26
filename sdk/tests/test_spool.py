@@ -12,6 +12,18 @@ from labflow._spool import PendingLog
 from labflow._telemetry import Telemetry
 
 
+def test_legacy_pending_file_is_not_replayed_under_the_new_protocol(tmp_path):
+    legacy = tmp_path / "pending.sqlite3"
+    legacy.write_bytes(b"legacy data preserved for manual disposal")
+    with client(
+        lambda request: pytest.fail("Legacy data must not be sent"),
+        capture_output=False,
+        spool_directory=tmp_path,
+    ) as connection:
+        assert connection.replay_pending()["sent"] == 0
+    assert legacy.read_bytes() == b"legacy data preserved for manual disposal"
+
+
 def client(handler, **options):
     return Client(
         api_key="lfp_spool-private-key",
@@ -75,9 +87,9 @@ def test_flush_deadline_preserves_inflight_queue_and_tail_then_replays_after_res
         assert not run._telemetry.thread.is_alive()
         pending, _ = connection._spool.read(100)
         assert len(pending) == 3
-        assert pending[0].request_id == requests[1].headers["X-Request-ID"]
+        assert pending[0].idempotency_key == requests[1].headers["Idempotency-Key"]
         assert "lfp_spool-private-key" not in (
-            connection._spool.directory / "pending.sqlite3"
+            connection._spool.directory / "pending-v2.sqlite3"
         ).read_bytes().decode("latin-1")
         assert connection.closed
     finally:
@@ -96,15 +108,16 @@ def test_flush_deadline_preserves_inflight_queue_and_tail_then_replays_after_res
         assert report == {"sent": 3, "remaining": 0, "failed": 0, "expired": 0, "last_error": None}
         assert all(request.headers["X-Labflow-Replay"] == "true" for request in replayed)
         assert [
-            (request.headers["X-Request-ID"], json.loads(request.content)) for request in replayed
-        ] == [(item.request_id, item.body) for item in pending]
+            (request.headers["Idempotency-Key"], json.loads(request.content))
+            for request in replayed
+        ] == [(item.idempotency_key, item.body) for item in pending]
         assert restarted.replay_pending()["sent"] == 0
 
 
-def test_spool_keeps_failed_replays_separates_backends_and_allows_a_rotated_key():
+def test_spool_keeps_failed_replays_and_separates_backends_and_api_keys():
     item = log()
     with client(lambda request: httpx.Response(409), capture_output=False) as connection:
-        assert connection._spool.save([item]) == {item.request_id}
+        assert connection._spool.save([item]) == {item.idempotency_key}
         assert connection.replay_pending() == {
             "sent": 0,
             "remaining": 1,
@@ -125,9 +138,13 @@ def test_spool_keeps_failed_replays_separates_backends_and_allows_a_rotated_key(
             lambda request: replayed.append(request) or httpx.Response(204)
         ),
     ) as rotated:
-        assert rotated.replay_pending()["sent"] == 1
-        assert replayed[0].headers["Authorization"] == "Bearer rotated-key"
-        assert replayed[0].headers["X-Request-ID"] == item.request_id
+        assert rotated.replay_pending()["sent"] == 0
+        assert replayed == []
+    with client(
+        lambda request: replayed.append(request) or httpx.Response(204), capture_output=False
+    ) as original:
+        assert original.replay_pending()["sent"] == 1
+        assert replayed[0].headers["Idempotency-Key"] == item.idempotency_key
 
 
 def test_retention_and_capacity_do_not_silently_evict_newer_records():
@@ -135,15 +152,15 @@ def test_retention_and_capacity_do_not_silently_evict_newer_records():
         lambda request: httpx.Response(204), capture_output=False, spool_max_bytes=150
     ) as connection:
         old = log(created_at=time.time() - 8 * 86400)
-        assert connection._spool.save([old]) == {old.request_id}
+        assert connection._spool.save([old]) == {old.idempotency_key}
         report = connection.replay_pending()
         assert report["expired"] == 1
         assert report["sent"] == report["remaining"] == 0
         first, second = log(), log("another")
-        assert connection._spool.save([first, second]) == {first.request_id}
+        assert connection._spool.save([first, second]) == {first.idempotency_key}
         pending, _ = connection._spool.read(100)
-        assert [item.request_id for item in pending] == [first.request_id]
-        assert connection._spool.save([first]) == {first.request_id}
+        assert [item.idempotency_key for item in pending] == [first.idempotency_key]
+        assert connection._spool.save([first]) == {first.idempotency_key}
         assert connection._spool.count() == 1
 
 
@@ -151,14 +168,16 @@ def test_deleted_or_inaccessible_runs_do_not_block_other_pending_logs():
     first, second = log("deleted run"), log("accessible run")
 
     def respond(request):
-        return httpx.Response(404 if request.headers["X-Request-ID"] == first.request_id else 204)
+        return httpx.Response(
+            404 if request.headers["Idempotency-Key"] == first.idempotency_key else 204
+        )
 
     with client(respond, capture_output=False) as connection:
         connection._spool.save([first, second])
         report = connection.replay_pending()
         assert report["sent"] == report["failed"] == report["remaining"] == 1
         remaining, _ = connection._spool.read(100)
-        assert remaining[0].request_id == first.request_id
+        assert remaining[0].idempotency_key == first.idempotency_key
 
 
 def test_storage_failure_is_visible_and_never_prevents_run_completion(monkeypatch, tmp_path):
@@ -210,7 +229,9 @@ def test_server_never_receives_a_log_before_its_durable_capture(monkeypatch):
             return httpx.Response(201, json={"runId": 1})
         if request.url.path.endswith("/logs"):
             pending, _ = connection._spool.read(100)
-            assert any(item.request_id == request.headers["X-Request-ID"] for item in pending)
+            assert any(
+                item.idempotency_key == request.headers["Idempotency-Key"] for item in pending
+            )
             observed.append(request)
         return httpx.Response(204)
 

@@ -51,7 +51,7 @@ import json, sys
 from pathlib import Path
 from labflow import Client
 backend, directory, result = sys.argv[1:]
-with Client(api_key="rotated-key", base_url=backend, spool_directory=directory) as client:
+with Client(api_key="lfp_crash-secret", base_url=backend, spool_directory=directory) as client:
     Path(result).write_text(json.dumps(client.replay_pending()))
 """
 
@@ -89,7 +89,7 @@ def test_force_kill_recovers_queued_inflight_and_partial_output_without_duplicat
                 payload = b'{"runId":1}'
                 self.send_response(201)
             else:
-                identity = self.headers["X-Request-ID"]
+                identity = self.headers["Idempotency-Key"]
                 with lock:
                     if identity in accepted:
                         assert accepted[identity] == body
@@ -131,13 +131,15 @@ def test_force_kill_recovers_queued_inflight_and_partial_output_without_duplicat
         writer.communicate(timeout=3)
         assert writer.returncode != 0
         release.set()
-        with Client(api_key="rotated-key", base_url=backend, spool_directory=directory) as reader:
+        with Client(
+            api_key="lfp_crash-secret", base_url=backend, spool_directory=directory
+        ) as reader:
             pending, _ = reader._spool.read(100)
             expected = ["first [REDACTED]\n", "queued 한글 🐈\n", "partial tail"]
             assert [log.body["message"] for log in pending] == expected
             assert reader._spool.count() == 3
             if phase == "after_commit":
-                assert attempts[0] == pending[0].request_id
+                assert attempts[0] == pending[0].idempotency_key
         result = tmp_path / "result.json"
         replay = python_process(REPLAYER, backend, str(directory), str(result))
         try:
@@ -157,7 +159,7 @@ def test_force_kill_recovers_queued_inflight_and_partial_output_without_duplicat
         assert len(accepted) == 3
         assert sorted(body["message"] for body in accepted.values()) == sorted(expected)
         assert len(attempts) == (4 if phase == "after_commit" else 3)
-        for file in directory.glob("pending.sqlite3*"):
+        for file in directory.glob("pending-v2.sqlite3*"):
             assert b"lfp_crash-secret" not in file.read_bytes()
     finally:
         release.set()

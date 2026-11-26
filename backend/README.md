@@ -354,13 +354,13 @@ API 키 서비스는 application 계층의 `IssueProjectApiKeyCommand`만 받습
 
 Artifact는 생성 시 `UPLOADING`이며 예약 크기와 실제 크기가 일치하고 업로드 기한 안에 검증되어야 `READY`로 전환합니다. 같은 크기/체크섬의 완료 재요청은 원래 업로드 시각을 유지하고, 다른 결과로 덮어쓰기는 거부합니다. 실패 시 `FAILED`, 삭제 요청 시 `DELETING`으로 전환합니다. 일반 파일 목록에는 `findReadyByRunId()`를 사용합니다. 전체 상태 조회는 `findByRunId()`이며 두 조회 모두 생성 시각/ID 오름차순, 최대 1,000개입니다. `save()`는 신규 INSERT, `update()`는 도메인 조회 버전과 JPA `@Version`을 검사하는 상태 변경입니다.
 
-SDK는 실행 중인 Run의 `POST /api/v1/sdk/runs/{runId}/artifacts?name=...&kind=OTHER`로 바이너리를 전송합니다. Content-Length와 X-Request-ID가 필요하며 성공 응답에는 artifactId가 들어 있습니다. 같은 요청 ID와 동일한 이름·종류·내용은 기존 ID를 반환합니다. 다운로드는 같은 프로젝트 키로 `GET /api/v1/sdk/runs/{runId}/artifacts/{artifactId}`를 호출하며 종료한 Run도 지원합니다.
+SDK는 실행 중인 Run의 `POST /api/v1/sdk/runs/{runId}/artifacts?name=...&kind=OTHER`로 바이너리를 전송합니다. Content-Length와 Idempotency-Key가 필요하며 성공 응답에는 artifactId가 들어 있습니다. 같은 요청 ID와 동일한 이름·종류·내용은 기존 ID를 반환합니다. 다운로드는 같은 프로젝트 키로 `GET /api/v1/sdk/runs/{runId}/artifacts/{artifactId}`를 호출하며 종료한 Run도 지원합니다.
 
 파일은 백엔드 작업 디렉터리 기준 `./data/artifacts`에 저장합니다. `labflow.artifacts.directory`, `labflow.artifacts.max-file-bytes`(기본 1 GiB), `labflow.artifacts.max-project-bytes`(기본 20 GiB)로 설정합니다. 업로드는 짧은 트랜잭션에서 프로젝트·Run 잠금과 용량 예약 → 잠금 밖에서 `.part` 파일 스트리밍·SHA-256 계산·로컬 원자적 이름 변경 → 짧은 트랜잭션에서 소속·실행 상태·기한 재검증과 READY 확정으로 처리합니다. UPLOADING 예약 크기도 프로젝트 용량에 포함하므로 동시 업로드로 한도를 넘길 수 없습니다. 전송 중 같은 프로젝트의 다른 Run 기록과 Heartbeat는 진행할 수 있습니다.
 
 동일 요청 ID가 아직 UPLOADING이면 409를 반환합니다. 일반 전송 실패는 파일과 예약을 제거하여 같은 ID로 재시도할 수 있습니다. 전송 중 프로젝트 삭제 또는 Run 종료가 먼저 확정되면 업로드 완료를 거부하고 파일·예약을 정리합니다. 비정상 종료로 남은 예약은 다음 업로드 예약 시 24시간 기한을 기준으로 정리합니다. 프로젝트 삭제 커밋 후에는 완료 파일과 임시 파일을 모두 삭제 시도합니다. DB 스키마 추가는 없습니다. 파일 삭제 자체가 실패하면 로그가 남으며 실제 MariaDB 잠금 및 파일시스템 장애는 별도 운영 검증이 필요합니다.
 
-Python SDK의 로컬 보관 로그는 `POST .../runs/{runId}/logs`에 `X-Labflow-Replay: true`와 원래 `X-Request-ID`를 함께 보내 복구합니다. 일반 로그와 같은 멱등성 작업으로 처리하여 응답 유실 후 복구도 중복 저장하지 않습니다. 복구에는 STDOUT/STDERR와 `recordedAt`이 필수이며 종료한 Run에서는 수집 시각이 종료 시각 이하여야 합니다. 인증·프로젝트 소속 검사는 그대로 적용하며 일반 종료 후 쓰기 금지는 유지합니다. `SdkRunHttpTests`와 실제 `PythonSdkIntegrationTests`에서 종료 후 복구·중복 제거를 확인합니다.
+Python SDK의 로컬 보관 로그는 `POST .../runs/{runId}/logs`에 `X-Labflow-Replay: true`와 원래 `Idempotency-Key`를 함께 보내 복구합니다. 일반 로그와 같은 멱등성 작업으로 처리하여 응답 유실 후 복구도 중복 저장하지 않습니다. 복구에는 STDOUT/STDERR와 `recordedAt`이 필수이며 종료한 Run에서는 수집 시각이 종료 시각 이하여야 합니다. 인증·프로젝트 소속 검사는 그대로 적용하며 일반 종료 후 쓰기 금지는 유지합니다. `SdkRunHttpTests`와 실제 `PythonSdkIntegrationTests`에서 종료 후 복구·중복 제거를 확인합니다.
 
 `RunService`와 `RunRecordService`는 인증이 완료된 `ProjectApiKeyPrincipal`을 받습니다. 실행의 소속 프로젝트와 소유자를 확인하므로 `PUBLIC` 프로젝트도 다른 프로젝트 키로 접근할 수 없습니다. 이는 SDK 전용 정책이며 일반 사용자용 공개 프로젝트 조회 정책은 별도로 구현해야 합니다. 실행 생성은 `RUNNING`, 종료는 `COMPLETED` 또는 `FAILED`입니다. 같은 완료 또는 같은 사유의 실패 재전송은 저장된 결과를 유지합니다. 다른 종료 결과로의 전환과 종료 후 기록 추가는 `409 RUN_STATE_CONFLICT`로 거부합니다. 없는 실행은 `404 RUN_NOT_FOUND`입니다.
 
@@ -372,11 +372,13 @@ SDK 상세와 웹 목록·상세는 실행 상태와 별도로 `connectionStatus
 
 `POST /api/v1/projects/{projectId}/runs/{runId}/stop`은 본문 없이 로그인한 프로젝트 소유자가 Run을 수동 종료하는 웹 API입니다. 쿠키 인증과 CSRF가 필요하며 PUBLIC 프로젝트도 소유자만 종료할 수 있습니다. 프로젝트 → 실행 순서로 잠가 SDK의 기록·Heartbeat·종료 및 프로젝트 삭제와 직렬화합니다. `FAILED`, 서버 종료 시각, `Manually stopped by project owner` 사유를 저장합니다. 같은 수동 종료 재요청은 204와 기존 종료 시각을 유지하며 이미 완료됐거나 다른 사유로 실패한 Run에는 409, URL의 프로젝트에 속하지 않는 Run에는 404를 반환합니다. 클라이언트 프로세스를 원격으로 중지하는 기능은 아닙니다.
 
-기록 추가와 종료는 같은 실행 행을 서비스 트랜잭션에서 잠가 직렬화합니다. 저장소의 잠금 조회는 활성 트랜잭션을 요구합니다. 실행 상태 갱신은 도메인의 조회 버전도 검사해 오래된 객체가 종료 상태를 덮어쓰지 못하게 합니다. 기록 배치는 한 트랜잭션이며 일부 값이 잘못되면 전체가 롤백됩니다. SDK 쓰기는 선택 `X-Request-ID` 헤더로 멱등성을 지원합니다. SDK 0.3.0은 쓰기마다 UUID v4를 생성하며 재시도에서 ID와 직렬화 본문을 유지합니다. 서버의 `sdk/request` 계층은 프로젝트 잠금 아래에서 요청 ID 해시와 작업/Run/정규화된 본문 해시를 비교합니다. 같은 ID/내용이면 원래 결과(생성 201 + 기존 runId, 기록/종료 204)를 반환하고, 다른 내용/작업/Run이면 `409 REQUEST_ID_CONFLICT`로 거부합니다. 요청 ID는 프로젝트 전체에서 유일하며 대소문자를 구분합니다. 키가 교체되어도 같은 프로젝트면 재전송할 수 있지만 인증과 접근 권한은 캐시 조회 전에 검사합니다.
+기록 배치는 한 트랜잭션이며 일부 값이 잘못되면 전체가 롤백됩니다. SDK 쓰기는 `Idempotency-Key`만 지원하며 SDK 0.4.0은 쓰기마다 UUID v4를 생성합니다. API 키 ID·HTTP 메서드·경로·키의 SHA-256 범위 해시를 공통 `idempotency_request` 테이블에서 관리합니다. 도메인 엔티티에는 멱등키를 저장하지 않습니다. JSON API는 헤더 선택, 파일 업로드는 필수이며 GET에서는 무시합니다. 키는 출력 가능한 ASCII 1~300자, 최초 선점부터 15일간 유효합니다.
 
-중복 판정과 실제 쓰기는 같은 트랜잭션으로 저장되므로 프로세스 재시작/다중 서버에서도 DB에 성공 기록이 남고, 실패는 기록과 요청 ID를 함께 롤백합니다. 이미 종료된 Run에 대한 기존 성공 요청의 재전송은 허용하지만 새 요청의 기록 추가는 기존대로 거부합니다. 헤더 없는 클라이언트는 기존 동작을 유지하며 같은 내용도 새 기록이 됩니다. SDK 자동 재시도는 기본 0회이고 `max_retries`로 0~5회 설정할 수 있습니다. Heartbeat 재전송도 같은 ID면 시각을 다시 갱신하지 않으며 다음 주기의 신호는 새 ID를 사용합니다.
+동일 내용 재전송은 최초 상태·본문과 Location 등 응답 헤더를 재생합니다. 내용·쿼리 변경은 `422 IDEMPOTENCY_KEY_REUSED`, 처리 중 중복은 `409 IDEMPOTENT_REQUEST_PROCESSING`과 Retry-After 1입니다. API 키 교체는 별도 범위이므로 과거 요청을 새 키로 보내면 중복 저장될 수 있습니다. 인증·현재 접근 권한 검사는 응답 재생 전에 수행합니다.
 
-테이블은 Flyway V1에 포함되며, 기존 DB 최초 편입 시 누락되었다면 `database/sdk-requests.sql`을 검토해 보정합니다. `sdk_request_entity`는 원문 본문/키 대신 요청 ID와 내용의 SHA-256 해시, 결과 Run ID와 생성 시각을 저장하고 `(project_id, request_key)` 유니크 제약을 둡니다. 성공한 쓰기마다 한 행이 추가되며 TTL 없이 프로젝트 삭제까지 유지합니다. 프로젝트 삭제 트랜잭션에서 함께 정리합니다. 이전 서버는 헤더를 무시하므로 서버를 먼저 배포한 후 SDK 재시도를 사용합니다.
+요청 선점은 짧은 별도 트랜잭션이고 JSON 쓰기는 프로젝트 → 원장 → Run 순서로 잠급니다. 업무 기록·요약·성공 응답은 같은 트랜잭션으로 커밋합니다. 처리된 오류는 업무 롤백 후 최초 오류를 저장하며, 결과 미확정 중단은 503과 같은 키 재시도를 안내합니다. 2분의 복구 lease가 지나도 살아 있는 JSON 요청은 NOWAIT 행 잠금으로 보호합니다. 파일은 원장의 artifact_id로 예약을 연결하고 OS 파일 잠금으로 재개를 보호합니다. 스트리밍 중에는 DB 트랜잭션을 유지하지 않고 완료 메타데이터·201 응답·SHA-256을 짧은 트랜잭션으로 함께 저장합니다.
+
+Flyway V3가 원장을 생성하고 이전 `sdk_request_entity` 및 Artifact의 `client_request_id`를 제거합니다. 실험·기록·파일은 보존하나 기존 멱등 기록은 이관하지 않습니다. 만료 원장은 1분마다 최대 1,000행을 지우고 프로젝트 삭제 때도 정리합니다. 서버 V3·SDK 0.4.0을 중지 배포로 함께 전환해야 하며, 기존 SDK는 호환되지 않습니다. 상세 절차와 DB 복원 요구 사항은 [DB 스키마 관리](database/README.md)를 참고하세요.
 
 요청 명령은 HTTP DTO와 분리되어 있으며 `sdk/presentation/SdkRunController`가 DTO를 명령으로 변환해 서비스를 호출합니다. Python SDK는 `sdk/src/labflow`에 구현되어 있으며 API key 설정, Run 생성, `params/metric/log/text`, 완료·실패 및 상태 조회를 제공합니다. SDK 0.2.0부터 환경 메타데이터, stdout/stderr, CPU/RAM·선택 NVIDIA GPU 지표와 주기 Heartbeat를 자동 수집합니다. 설치·사용법과 실제 HTTP 연결 테스트는 [SDK README](../sdk/README.md)를 참고하세요. 클라이언트 기록 시각이 없으면 서버 시각을 사용하고 경과 시간은 초 단위입니다. 메타데이터 키는 100자/값은 2,000자, 파라미터 값은 2,000자, 로그 본문은 16,000자, 텍스트 본문은 65,536자, 실패 사유는 4,000자로 제한합니다.
 

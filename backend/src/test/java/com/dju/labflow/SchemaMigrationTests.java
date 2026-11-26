@@ -25,7 +25,7 @@ class SchemaMigrationTests {
     void emptyDatabaseMigratesTheCompleteSchemaOnceAndPreservesExistingRows() throws Exception {
         String url = database();
         Flyway flyway = flyway(url, "classpath:db/migration");
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
         try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
             HashSet<String> tables = new HashSet<>();
             try (ResultSet result =
@@ -52,11 +52,11 @@ class SchemaMigrationTests {
                             "RUN_SYSTEM_METRIC_ENTITY",
                             "RUN_SYSTEM_METRIC_GPU",
                             "RUN_ARTIFACT_ENTITY",
-                            "SDK_REQUEST_ENTITY");
+                            "IDEMPOTENCY_REQUEST");
             insertUser(connection);
         }
         assertThat(flyway.migrate().migrationsExecuted).isZero();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertUserPreserved(url);
         assertThatThrownBy(flyway::clean).isInstanceOf(FlywayException.class);
@@ -76,8 +76,8 @@ class SchemaMigrationTests {
                 .hasMessageContaining("non-empty");
         assertThat(flyway.info().current()).isNull();
         flyway.baseline();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
         assertUserPreserved(url);
     }
 
@@ -102,7 +102,7 @@ class SchemaMigrationTests {
                 (5,20,'loss',0.7,0,'2026-11-26 00:00:00')
                 """);
         }
-        assertThat(flyway(url, "classpath:db/migration").migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway(url, "classpath:db/migration").migrate().migrationsExecuted).isEqualTo(2);
         try (Connection connection = DriverManager.getConnection(url, "sa", "");
                 Statement statement = connection.createStatement();
                 ResultSet result =

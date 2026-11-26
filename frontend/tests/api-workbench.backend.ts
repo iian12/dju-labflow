@@ -65,7 +65,7 @@ try {
   await page.locator('nav[aria-label="API 선택"]').getByRole('link', { name: 'POST 파일 업로드', exact: true }).click();
   const payload = Buffer.from('LabFlow ADMIN artifact\n한글 파일');
   await page.getByLabel('업로드할 파일', { exact: true }).setInputFiles({ name: '학습 결과.bin', mimeType: 'application/octet-stream', buffer: payload });
-  await page.getByLabel('Request ID (비우면 자동 생성)', { exact: true }).fill('workbench-artifact');
+  await page.getByLabel('Idempotency-Key (비우면 자동 생성)', { exact: true }).fill('workbench-artifact');
   await send();
   const artifactId = await page.getByLabel('Artifact ID', { exact: true }).inputValue();
   assert.match(artifactId, /^\d+$/);

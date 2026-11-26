@@ -53,7 +53,7 @@ const web=async(method,route,body)=>request(method,controlBase+route,body,{
   ...(!['GET','HEAD'].includes(method)?{'X-XSRF-TOKEN':decodeURIComponent(cookieJar.get('XSRF-TOKEN')??'')}:{})
 });
 const sdk=(method,route,body)=>request(method,controlBase+'/api/v1/sdk'+route,body,{
-  Authorization:'Bearer '+apiKey,'Content-Type':'application/json','X-Request-ID':crypto.randomUUID()
+  Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()
 });
 const prom=async(expr,start,end)=>{
   const route=start===undefined?'/api/v1/query':'/api/v1/query_range';

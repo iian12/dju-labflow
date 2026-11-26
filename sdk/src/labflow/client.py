@@ -35,6 +35,17 @@ if TYPE_CHECKING:
     from .run import Run
 
 
+def _retryable_response(response: httpx.Response) -> bool:
+    if response.status_code in {502, 503, 504}:
+        return True
+    if response.status_code == 409:
+        try:
+            return response.json().get("code") == "IDEMPOTENT_REQUEST_PROCESSING"
+        except (ValueError, AttributeError):
+            return False
+    return False
+
+
 class Client:
     """Connection pool for explicit run objects and server status queries.
 
@@ -126,7 +137,12 @@ class Client:
                 "Use a nonnegative flush_timeout, valid spool directory, "
                 "positive retention days and integer capacity"
             ) from None
-        self._spool = Spool(directory, url.rstrip("/") + "/", retention, capacity)
+        self._spool = Spool(
+            directory,
+            url.rstrip("/") + "/#api-key=" + hashlib.sha256(key.encode()).hexdigest(),
+            retention,
+            capacity,
+        )
         self._runs: set[Run] = set()
         self._http_options = dict(
             base_url=url.rstrip("/") + "/",
@@ -163,7 +179,11 @@ class Client:
         for log in logs:
             try:
                 self._request(
-                    "POST", log.path, body=log.body, request_id=log.request_id, _replay=True
+                    "POST",
+                    log.path,
+                    body=log.body,
+                    idempotency_key=log.idempotency_key,
+                    _replay=True,
                 )
                 self._spool.remove(log)
                 sent += 1
@@ -213,7 +233,7 @@ class Client:
         name: str,
         *,
         metadata: Mapping[str, Scalar] | None = None,
-        request_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> "Run":
         from ._telemetry import environment
         from .run import Run
@@ -224,14 +244,16 @@ class Client:
             collected.update(validate.string_map(metadata, "Metadata", empty=True))
         if collected or metadata is not None:
             body["metadata"] = validate.string_map(collected, "Metadata", empty=True)
-        data = self._request("POST", _ROOT, body=body, expected=201, request_id=request_id)
+        data = self._request(
+            "POST", _ROOT, body=body, expected=201, idempotency_key=idempotency_key
+        )
         try:
             run_id = validate.integer(data["runId"], "Run ID", minimum=1)
         except (ValidationError, KeyError, TypeError):
             raise ProtocolError(
                 "Run creation response must contain a positive 64-bit runId"
             ) from None
-        if request_id is not None:
+        if idempotency_key is not None:
             for existing in self._runs:
                 if existing.id == run_id:
                     return existing
@@ -255,20 +277,25 @@ class Client:
         return data
 
     def upload_artifact(
-        self, run_id: int, path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+        self,
+        run_id: int,
+        path: str | Path,
+        *,
+        kind: str = "OTHER",
+        idempotency_key: str | None = None,
     ) -> int:
         """Upload a local file and return its artifact ID."""
         run_id = validate.integer(run_id, "Run ID", minimum=1)
         if self.closed:
             raise RunStateError("Client is closed")
         source = Path(path)
-        key = str(uuid4()) if request_id is None else request_id
-        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key):
-            raise ValidationError("Invalid artifact request_id")
+        key = str(uuid4()) if idempotency_key is None else idempotency_key
+        if not isinstance(key, str) or not re.fullmatch(r"[!-~]{1,300}", key):
+            raise ValidationError("Invalid artifact idempotency_key")
         with source.open("rb") as stream:
             headers = {
                 "Content-Type": "application/octet-stream",
-                "X-Request-ID": key,
+                "Idempotency-Key": key,
                 "Content-Length": str(os.fstat(stream.fileno()).st_size),
             }
             for attempt in range(self._max_retries + 1):
@@ -283,10 +310,10 @@ class Client:
                 except httpx.RequestError:
                     if attempt == self._max_retries:
                         raise NetworkError(
-                            "Artifact upload interrupted", request_id=key, attempts=attempt + 1
+                            "Artifact upload interrupted", idempotency_key=key, attempts=attempt + 1
                         ) from None
                 else:
-                    if response.status_code not in {502, 503, 504} or attempt == self._max_retries:
+                    if not _retryable_response(response) or attempt == self._max_retries:
                         break
                 time.sleep(0.2 * 2**attempt)
         if response.status_code >= 400:
@@ -343,7 +370,7 @@ class Client:
         *,
         body: dict | None = None,
         expected: int = 204,
-        request_id: str | None = None,
+        idempotency_key: str | None = None,
         _http: httpx.Client | None = None,
         _replay: bool = False,
         _cancel=None,
@@ -353,16 +380,16 @@ class Client:
             raise RunStateError("Client is closed")
         writing = method in {"POST", "PUT", "PATCH", "DELETE"}
         if writing:
-            if request_id is None:
-                request_id = str(uuid4())
-            elif not isinstance(request_id, str) or not re.fullmatch(
-                r"[A-Za-z0-9_-]{1,64}", request_id
+            if idempotency_key is None:
+                idempotency_key = str(uuid4())
+            elif not isinstance(idempotency_key, str) or not re.fullmatch(
+                r"[!-~]{1,300}", idempotency_key
             ):
                 raise ValidationError(
-                    "request_id must contain 1 to 64 ASCII letters, digits, - or _"
+                    "idempotency_key must contain 1 to 300 visible ASCII characters"
                 )
         # Freeze the body once, including automatically generated timestamps/elapsed time.
-        headers = {"X-Request-ID": request_id} if writing else {}
+        headers = {"Idempotency-Key": idempotency_key} if writing else {}
         if _replay:
             headers["X-Labflow-Replay"] = "true"
         request = http.build_request(
@@ -385,11 +412,11 @@ class Client:
                     continue
                 raise NetworkError(
                     "LabFlow connection failed or timed out; server-side outcome may be unknown. "
-                    "Reuse the original request_id and body when retrying.",
-                    request_id=request_id,
+                    "Reuse the original idempotency_key and body when retrying.",
+                    idempotency_key=idempotency_key,
                     attempts=attempt + 1,
                 ) from None
-            if response.status_code in {502, 503, 504} and attempt < self._max_retries:
+            if _retryable_response(response) and attempt < self._max_retries:
                 response.close()
                 if _cancel is None:
                     time.sleep(0.2 * 2**attempt)
@@ -433,5 +460,12 @@ class Client:
             403: PermissionDeniedError,
             404: NotFoundError,
             409: ConflictError,
+            422: ConflictError,
         }.get(status, ApiError)
-        raise error(status, code, message, fields)
+        raise error(
+            status,
+            code,
+            message,
+            fields,
+            idempotency_key=response.request.headers.get("Idempotency-Key"),
+        )

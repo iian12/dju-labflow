@@ -1,6 +1,5 @@
 package com.dju.labflow.run.artifact.infrastructure.persistence;
 
-import com.dju.labflow.global.validation.InputValidation;
 import com.dju.labflow.run.artifact.domain.*;
 import com.dju.labflow.run.artifact.domain.repository.RunArtifactRepository;
 import com.dju.labflow.run.run.domain.RunId;
@@ -52,16 +51,6 @@ public class RunArtifactRepositoryImpl implements RunArtifactRepository {
     public Optional<RunArtifact> findById(RunArtifactId id) {
         if (id == null) return Optional.empty();
         return artifacts.findById(id.value()).map(RunArtifactMapper::toDomain);
-    }
-
-    @Override
-    public Optional<RunArtifact> findByRunIdAndClientRequestId(
-            RunId runId, String clientRequestId) {
-        Objects.requireNonNull(runId, "Run ID must not be null");
-        InputValidation.text(clientRequestId, "Client request ID", 64);
-        return artifacts
-                .findByRunIdAndClientRequestId(runId.value(), clientRequestId)
-                .map(RunArtifactMapper::toDomain);
     }
 
     @Override

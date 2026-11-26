@@ -17,7 +17,7 @@ import psutil
 class PendingLog:
     path: str
     body: dict
-    request_id: str = field(default_factory=lambda: str(uuid4()))
+    idempotency_key: str = field(default_factory=lambda: str(uuid4()))
     created_at: float = field(default_factory=time.time)
     _storage: str | None = field(default=None, repr=False, compare=False)
 
@@ -31,7 +31,7 @@ class Spool:
 
     def _connect(self):
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path = self.directory / "pending.sqlite3"
+        path = self.directory / "pending-v2.sqlite3"
         # Create with private permissions before SQLite can write any log content.
         descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         os.close(descriptor)
@@ -40,7 +40,7 @@ class Spool:
             connection.execute("pragma synchronous = FULL")
             connection.execute("""create table if not exists pending (
                 identity text primary key, backend text not null, path text not null,
-                request_id text not null, body text not null, created_at real not null,
+                idempotency_key text not null, body text not null, created_at real not null,
                 size_bytes integer not null, expires_at real not null)""")
             connection.execute("""create table if not exists buffers (
                 identity text primary key, backend text not null, owner_pid integer not null,
@@ -82,7 +82,7 @@ class Spool:
 
     def _identity(self, log: PendingLog):
         return hashlib.sha256(
-            json.dumps([self.backend, log.path, log.request_id]).encode()
+            json.dumps([self.backend, log.path, log.idempotency_key]).encode()
         ).hexdigest()
 
     def save(self, logs: list[PendingLog]) -> set[str]:
@@ -105,7 +105,7 @@ class Spool:
                     ).fetchone()
                     if previous:
                         if previous[0] == body:
-                            saved.add(log.request_id)
+                            saved.add(log.idempotency_key)
                         continue
                     if used + size > self.max_bytes:
                         continue
@@ -115,7 +115,7 @@ class Spool:
                             identity,
                             self.backend,
                             log.path,
-                            log.request_id,
+                            log.idempotency_key,
                             body,
                             log.created_at,
                             size,
@@ -123,7 +123,7 @@ class Spool:
                         ),
                     )
                     used += size
-                    saved.add(log.request_id)
+                    saved.add(log.idempotency_key)
             return saved
         finally:
             connection.close()
@@ -140,7 +140,7 @@ class Spool:
                 self._identity(log),
                 self.backend,
                 log.path,
-                log.request_id,
+                log.idempotency_key,
                 body,
                 log.created_at,
                 len(body.encode("utf-8")),
@@ -170,7 +170,7 @@ class Spool:
                         {
                             "path": log.path,
                             "body": log.body,
-                            "request_id": log.request_id,
+                            "idempotency_key": log.idempotency_key,
                             "created_at": log.created_at,
                         }
                         for log in checkpoint
@@ -249,7 +249,7 @@ class Spool:
         return expired
 
     def read(self, limit: int) -> tuple[list[PendingLog], int]:
-        if not (self.directory / "pending.sqlite3").exists():
+        if not (self.directory / "pending-v2.sqlite3").exists():
             return [], 0
         connection = self._connect()
         try:
@@ -258,26 +258,26 @@ class Spool:
                 expired = self._expire(connection)
                 self._recover_buffers(connection)
                 rows = connection.execute(
-                    "select path, body, request_id, created_at from pending "
+                    "select path, body, idempotency_key, created_at from pending "
                     "where backend = ? order by created_at, identity limit ?",
                     (self.backend, limit),
                 ).fetchall()
             logs = []
-            for path, body, request_id, created_at in rows:
+            for path, body, idempotency_key, created_at in rows:
                 if not re.fullmatch(r"api/v1/sdk/runs/[1-9][0-9]*/logs", path):
                     raise ValueError("Invalid pending log path")
-                if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_id):
-                    raise ValueError("Invalid pending request ID")
+                if not re.fullmatch(r"[!-~]{1,300}", idempotency_key):
+                    raise ValueError("Invalid pending idempotency key")
                 payload = json.loads(body)
                 if not isinstance(payload, dict):
                     raise ValueError("Invalid pending log body")
-                logs.append(PendingLog(path, payload, request_id, created_at))
+                logs.append(PendingLog(path, payload, idempotency_key, created_at))
             return logs, expired
         finally:
             connection.close()
 
     def remove(self, log: PendingLog) -> None:
-        if not (self.directory / "pending.sqlite3").exists():
+        if not (self.directory / "pending-v2.sqlite3").exists():
             return
         connection = self._connect()
         try:
@@ -287,7 +287,7 @@ class Spool:
             connection.close()
 
     def count(self) -> int:
-        if not (self.directory / "pending.sqlite3").exists():
+        if not (self.directory / "pending-v2.sqlite3").exists():
             return 0
         connection = self._connect()
         try:

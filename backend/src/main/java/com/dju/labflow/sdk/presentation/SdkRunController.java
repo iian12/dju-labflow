@@ -2,321 +2,242 @@ package com.dju.labflow.sdk.presentation;
 
 import com.dju.labflow.global.SecurityErrorResponse;
 import com.dju.labflow.project.key.domain.ProjectApiKeyPrincipal;
-import com.dju.labflow.run.run.application.RunHeartbeatPolicy;
-import com.dju.labflow.run.run.application.RunRecordService;
-import com.dju.labflow.run.run.application.RunService;
-import com.dju.labflow.run.run.domain.Run;
-import com.dju.labflow.run.run.domain.RunId;
-import com.dju.labflow.sdk.request.application.SdkRequestService;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
+import com.dju.labflow.run.run.application.*;
+import com.dju.labflow.run.run.domain.*;
+import io.swagger.v3.oas.annotations.*;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.responses.*;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.net.URI;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-/** 프로젝트 Bearer API 키로 실행을 생성하고 기록/종료하는 SDK 전용 HTTP API. */
+/** SDK 인증과 도메인 작업을 연결한다. 멱등 응답 원장은 인증 뒤 공통 필터에서 처리한다. */
 @RestController
 @RequestMapping(value = "/api/v1/sdk/runs", produces = MediaType.APPLICATION_JSON_VALUE)
-@Tag(name = "SDK Runs", description = "프로젝트 API 키로 실험 실행과 기록을 관리합니다. CSRF는 필요하지 않습니다.")
+@Tag(name = "SDK Runs", description = "프로젝트 API 키로 실험을 기록합니다. CSRF는 필요하지 않습니다.")
 @SecurityRequirement(name = "projectApiKey")
 @ApiResponses({
     @ApiResponse(
             responseCode = "400",
-            description = "잘못된 요청 본문 또는 경로 인자",
+            description = "Invalid request or key",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
     @ApiResponse(
             responseCode = "401",
-            description = "API 키 누락/오류/폐기 또는 비활성 소유자 계정",
+            description = "Invalid API key",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
     @ApiResponse(
             responseCode = "403",
-            description = "다른 프로젝트 또는 소유자의 실행에 접근",
+            description = "Forbidden",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
     @ApiResponse(
             responseCode = "404",
-            description = "실행 또는 프로젝트 없음",
+            description = "Not found",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
     @ApiResponse(
             responseCode = "409",
-            description = "종료 상태/파라미터 값/저장 버전/requestId 충돌",
+            description = "Processing or state conflict",
+            content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class))),
+    @ApiResponse(
+            responseCode = "422",
+            description = "Idempotency content mismatch",
             content = @Content(schema = @Schema(implementation = SecurityErrorResponse.class)))
 })
 public class SdkRunController {
-    private final SdkRequestService requestService;
-    private final RunService runService;
-    private final RunRecordService runRecordService;
+    private final RunService runs;
+    private final RunRecordService records;
     private final RunHeartbeatPolicy heartbeats;
 
     public SdkRunController(
-            RunService runService,
-            RunRecordService runRecordService,
-            SdkRequestService requestService,
-            RunHeartbeatPolicy heartbeats) {
-        this.requestService = requestService;
-        this.runService = runService;
-        this.runRecordService = runRecordService;
+            RunService runs, RunRecordService records, RunHeartbeatPolicy heartbeats) {
+        this.runs = runs;
+        this.records = records;
         this.heartbeats = heartbeats;
     }
 
     @PostMapping
-    @Operation(summary = "실행 생성", description = "프로젝트와 소유자는 인증된 키에서 결정합니다.")
-    @ApiResponse(responseCode = "201", description = "RUNNING 실행 생성, Location 헤더로 조회 경로 제공")
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "실행 생성")
+    @ApiResponse(responseCode = "201", description = "Created")
     public ResponseEntity<RunCreateResponse> create(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
             @Valid @RequestBody RunCreateRequest request) {
-        RunId runId =
-                requestService.execute(
-                        principal,
-                        requestId,
-                        "create",
-                        null,
-                        request.toCommand(),
-                        () -> runService.create(principal, request.toCommand()));
+        RunId id = runs.create(principal, request.toCommand());
         URI location =
                 ServletUriComponentsBuilder.fromCurrentRequestUri()
                         .path("/{runId}")
-                        .buildAndExpand(runId.value())
+                        .buildAndExpand(id.value())
                         .toUri();
-        return ResponseEntity.created(location).body(RunCreateResponse.from(runId));
+        return ResponseEntity.created(location).body(RunCreateResponse.from(id));
     }
 
     @GetMapping("/{runId}")
-    @Operation(summary = "실행 조회", description = "키에 연결된 프로젝트의 실행만 조회할 수 있습니다.")
-    @ApiResponse(responseCode = "200", description = "실행 상태와 메타데이터")
+    @Operation(summary = "실행 조회")
+    @ApiResponse(responseCode = "200", description = "Run")
     public ResponseEntity<RunResponse> get(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Positive @PathVariable("runId") Long runId) {
-        Run run = runService.get(principal, RunId.of(runId));
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId) {
+        Run run = runs.get(principal, RunId.of(runId));
         return ResponseEntity.ok(RunResponse.from(run, heartbeats.status(run)));
     }
 
     @PutMapping("/{runId}/parameters")
-    @Operation(summary = "실행 파라미터 추가", description = "실행 중 같은 키/값 재전송은 허용하고 값 변경은 거부합니다.")
-    @ApiResponse(responseCode = "204", description = "파라미터 반영", content = @Content)
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "학습 파라미터 기록")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> parameters(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody RunParameterRequest request) {
-        requestService.execute(
-                principal,
-                requestId,
-                "parameters",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    runRecordService.parameters(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        records.parameters(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/metrics")
     @Operation(
-            summary = "숫자 메트릭 기록",
-            description = "숫자 형태의 문자열을 포함해 JSON 숫자가 아닌 값은 거부합니다. 배치는 함께 저장/롤백합니다.")
-    @ApiResponse(responseCode = "204", description = "메트릭 기록", content = @Content)
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "숫자 메트릭 기록")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> metrics(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody MetricRequest request) {
-        requestService.execute(
-                principal,
-                requestId,
-                "metrics",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    runRecordService.metrics(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        records.metrics(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/logs")
     @Operation(
-            summary = "실행 로그 기록",
-            description = "USER/STDOUT/STDERR/SDK 출처와 레벨을 명시합니다. 빈 출력도 보존합니다.")
-    @ApiResponse(responseCode = "204", description = "로그 기록", content = @Content)
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "로그 기록")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> log(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "로컬 보관 stdout/stderr 복구. 요청 ID와 수집 시각 필수이며 종료 시각 이후 로그는 거부합니다.")
-                    @RequestHeader(value = "X-Labflow-Replay", defaultValue = "false")
-                    boolean replay,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @RequestHeader(value = "X-Labflow-Replay", defaultValue = "false") boolean replay,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody LogCreateRequest request) {
-        if (replay && requestId == null)
-            throw new IllegalArgumentException("Recovered logs require X-Request-ID");
-        requestService.execute(
-                principal,
-                requestId,
-                "log",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    if (replay)
-                        runRecordService.recoverLog(
-                                principal, RunId.of(runId), request.toCommand());
-                    else runRecordService.log(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        if (replay && key == null)
+            throw new IllegalArgumentException("Recovered logs require Idempotency-Key");
+        if (replay) records.recoverLog(principal, RunId.of(runId), request.toCommand());
+        else records.log(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/texts")
-    @Operation(summary = "실험 텍스트 기록", description = "모델 입력·출력·정답을 이름과 선택 step으로 기록합니다.")
-    @ApiResponse(responseCode = "204", description = "텍스트 기록", content = @Content)
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "텍스트 기록")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> text(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody TextCreateRequest request) {
-        requestService.execute(
-                principal,
-                requestId,
-                "text",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    runRecordService.text(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        records.text(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/system-metrics")
-    @Operation(summary = "시스템 지표 기록", description = "CPU/GPU 사용률은 0~100, 메모리는 바이트, 경과 시간은 초 단위입니다.")
-    @ApiResponse(responseCode = "204", description = "시스템 지표 기록", content = @Content)
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "시스템 지표 기록")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> systemMetric(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody SystemMetricCreateRequest request) {
-        requestService.execute(
-                principal,
-                requestId,
-                "systemMetric",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    runRecordService.systemMetric(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        records.systemMetric(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/heartbeat")
     @Operation(
-            summary = "실행 생존 신호",
-            description = "RUNNING 실행의 마지막 생존 시각을 서버 시각으로 갱신합니다. 본문은 없습니다.")
-    @ApiResponse(responseCode = "204", description = "생존 시각 갱신", content = @Content)
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "생존 신호")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> heartbeat(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId) {
-        requestService.execute(
-                principal,
-                requestId,
-                "heartbeat",
-                RunId.of(runId),
-                null,
-                () -> {
-                    runService.heartbeat(principal, RunId.of(runId));
-                    return RunId.of(runId);
-                });
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId) {
+        runs.heartbeat(principal, RunId.of(runId));
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/complete")
-    @Operation(summary = "실행 완료", description = "본문 없이 호출합니다. 이미 완료된 실행의 재호출은 기존 종료 결과를 유지합니다.")
-    @ApiResponse(responseCode = "204", description = "완료 처리", content = @Content)
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "실행 완료")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> complete(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId) {
-        requestService.execute(
-                principal,
-                requestId,
-                "complete",
-                RunId.of(runId),
-                null,
-                () -> {
-                    runService.complete(principal, RunId.of(runId));
-                    return RunId.of(runId);
-                });
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId) {
+        runs.complete(principal, RunId.of(runId));
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{runId}/fail")
-    @Operation(summary = "실행 실패", description = "같은 사유의 재전송은 허용하고 다른 종료 결과로의 변경은 거부합니다.")
-    @ApiResponse(responseCode = "204", description = "실패 처리", content = @Content)
+    @Operation(
+            parameters =
+                    @Parameter(
+                            name = "Idempotency-Key",
+                            in = ParameterIn.HEADER,
+                            description = "선택 멱등키. 최대 300자, API 키·주소·메서드별 15일 유효. GET은 무시합니다.",
+                            schema = @Schema(maxLength = 300)),
+            summary = "실행 실패")
+    @ApiResponse(responseCode = "204", description = "Recorded", content = @Content)
     public ResponseEntity<Void> fail(
-            @Parameter(hidden = true) @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
-            @Parameter(
-                            description =
-                                    "SDK requestId. 같은 프로젝트에서 같은 ID/내용은 기존 결과 반환, 다른 내용은 409. 영문/숫자/-/_ 1~64자.")
-                    @RequestHeader(value = "X-Request-ID", required = false)
-                    String requestId,
-            @Positive @PathVariable("runId") Long runId,
+            @AuthenticationPrincipal ProjectApiKeyPrincipal principal,
+            @Positive @PathVariable Long runId,
             @Valid @RequestBody RunFailRequest request) {
-        requestService.execute(
-                principal,
-                requestId,
-                "fail",
-                RunId.of(runId),
-                request.toCommand(),
-                () -> {
-                    runService.fail(principal, RunId.of(runId), request.toCommand());
-                    return RunId.of(runId);
-                });
+        runs.fail(principal, RunId.of(runId), request.toCommand());
         return ResponseEntity.noContent().build();
     }
 }

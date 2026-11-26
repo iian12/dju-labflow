@@ -22,6 +22,53 @@ def connection(handler, **kwargs):
     )
 
 
+def test_standard_header_accepts_300_characters_without_legacy_header():
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(201, json={"runId": 1})
+
+    with connection(respond) as client:
+        client.start_run("long key", idempotency_key="k" * 300)
+    assert calls[0].headers["Idempotency-Key"] == "k" * 300
+    assert "X-Request-ID" not in calls[0].headers
+
+
+def test_processing_response_retries_same_key_and_frozen_body(monkeypatch):
+    monkeypatch.setattr("labflow.client.time.sleep", lambda delay: None)
+    calls = []
+
+    def respond(request):
+        calls.append((request.headers["Idempotency-Key"], request.content))
+        if len(calls) == 1:
+            return httpx.Response(
+                409, json={"code": "IDEMPOTENT_REQUEST_PROCESSING", "message": "Processing"}
+            )
+        return httpx.Response(201, json={"runId": 1})
+
+    with connection(respond, max_retries=1) as client:
+        client.start_run("retry")
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
+def test_changed_content_422_is_not_retried_and_exposes_key():
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(
+            422, json={"code": "IDEMPOTENCY_KEY_REUSED", "message": "Different content"}
+        )
+
+    with connection(respond, max_retries=2) as client:
+        with pytest.raises(ApiError) as error:
+            client.start_run("conflict", idempotency_key="one-operation")
+    assert len(calls) == 1
+    assert error.value.idempotency_key == "one-operation"
+
+
 def test_write_identities_are_unique_and_can_be_supplied_explicitly():
     requests = []
 
@@ -42,16 +89,16 @@ def test_write_identities_are_unique_and_can_be_supplied_explicitly():
             run.text("prediction", "cat")
             run.heartbeat()
             client.get_run(run.id)
-            run.log("explicit", request_id="event-1")
+            run.log("explicit", idempotency_key="event-1")
     generated = [
-        r.headers["X-Request-ID"]
+        r.headers["Idempotency-Key"]
         for r in requests
-        if r.method != "GET" and r.headers["X-Request-ID"] != "event-1"
+        if r.method != "GET" and r.headers["Idempotency-Key"] != "event-1"
     ]
     assert len(generated) == len(set(generated)) == 8
     assert all(UUID(value).version == 4 for value in generated)
-    assert requests[-2].headers["X-Request-ID"] == "event-1"
-    assert "X-Request-ID" not in next(r for r in requests if r.method == "GET").headers
+    assert requests[-2].headers["Idempotency-Key"] == "event-1"
+    assert "Idempotency-Key" not in next(r for r in requests if r.method == "GET").headers
 
 
 def test_retry_after_lost_response_preserves_id_and_frozen_payload(monkeypatch):
@@ -59,7 +106,7 @@ def test_retry_after_lost_response_preserves_id_and_frozen_payload(monkeypatch):
     requests = []
 
     def respond(request):
-        requests.append((request.url.path, request.headers["X-Request-ID"], request.content))
+        requests.append((request.url.path, request.headers["Idempotency-Key"], request.content))
         if request.url.path.endswith("/runs"):
             return httpx.Response(201, json={"runId": 1})
         if request.url.path.endswith("/metrics"):
@@ -91,7 +138,7 @@ def test_gateway_retry_reuses_creation_identity(monkeypatch, status):
         run = client.start_run("gateway")
         run.close()
     assert len(requests) == 2
-    assert requests[0].headers["X-Request-ID"] == requests[1].headers["X-Request-ID"]
+    assert requests[0].headers["Idempotency-Key"] == requests[1].headers["Idempotency-Key"]
     assert requests[0].content == requests[1].content
 
 
@@ -114,7 +161,7 @@ def test_retry_budget_and_error_identity_are_observable(monkeypatch):
     monkeypatch.setattr("labflow.client.time.sleep", delays.append)
 
     def respond(request):
-        ids.append(request.headers["X-Request-ID"])
+        ids.append(request.headers["Idempotency-Key"])
         raise httpx.ReadTimeout("lfp_idempotency-test")
 
     with connection(respond, max_retries=2) as client:
@@ -122,16 +169,16 @@ def test_retry_budget_and_error_identity_are_observable(monkeypatch):
             client.start_run("unavailable")
     assert len(ids) == caught.value.attempts == 3
     assert len(set(ids)) == 1
-    assert caught.value.request_id == ids[0]
+    assert caught.value.idempotency_key == ids[0]
     assert delays == [0.2, 0.4]
     assert "lfp_idempotency-test" not in str(caught.value)
 
 
-@pytest.mark.parametrize("request_id", ["", "a" * 65, "한글", "has space", "bad\nheader", 1])
-def test_invalid_identity_is_rejected_before_http(request_id):
+@pytest.mark.parametrize("idempotency_key", ["", "a" * 301, "한글", "has space", "bad\nheader", 1])
+def test_invalid_identity_is_rejected_before_http(idempotency_key):
     with connection(lambda request: pytest.fail("Unexpected HTTP request")) as client:
         with pytest.raises(ValidationError):
-            client.start_run("invalid", request_id=request_id)
+            client.start_run("invalid", idempotency_key=idempotency_key)
 
 
 @pytest.mark.parametrize("retries", [-1, 6, True, "1", 1.5])
@@ -142,12 +189,12 @@ def test_retry_configuration_is_bounded(retries):
 
 def test_explicit_creation_replay_does_not_start_a_second_collector():
     with connection(lambda request: httpx.Response(201, json={"runId": 1})) as client:
-        first = client.start_run("same", request_id="same-create")
-        assert client.start_run("same", request_id="same-create") is first
+        first = client.start_run("same", idempotency_key="same-create")
+        assert client.start_run("same", idempotency_key="same-create") is first
         assert len(client._runs) == 1
 
 
-def test_facade_forwards_explicit_request_ids(monkeypatch):
+def test_facade_forwards_explicit_idempotency_keys(monkeypatch):
     requests = []
 
     def respond(request):
@@ -160,14 +207,14 @@ def test_facade_forwards_explicit_request_ids(monkeypatch):
 
     with connection(respond) as client:
         monkeypatch.setattr(labflow, "Client", lambda **options: client)
-        with labflow.init("facade", request_id="create-1"):
-            labflow.params({"batch": 1}, request_id="params-1")
-            labflow.metric({"loss": 1}, request_id="metric-1")
-            labflow.log("one", request_id="log-1")
-            labflow.text("one", "two", request_id="text-1")
-            labflow.heartbeat(request_id="heartbeat-1")
-            labflow.finish(request_id="finish-1")
-    assert [r.headers["X-Request-ID"] for r in requests] == [
+        with labflow.init("facade", idempotency_key="create-1"):
+            labflow.params({"batch": 1}, idempotency_key="params-1")
+            labflow.metric({"loss": 1}, idempotency_key="metric-1")
+            labflow.log("one", idempotency_key="log-1")
+            labflow.text("one", "two", idempotency_key="text-1")
+            labflow.heartbeat(idempotency_key="heartbeat-1")
+            labflow.finish(idempotency_key="finish-1")
+    assert [r.headers["Idempotency-Key"] for r in requests] == [
         "create-1",
         "params-1",
         "metric-1",
@@ -206,5 +253,5 @@ def test_captured_output_retries_the_same_log(monkeypatch):
         assert run.telemetry_status["errors"] == 0
     logs = [r for r in requests if r.url.path.endswith("/logs")]
     assert len(logs) == 2
-    assert logs[0].headers["X-Request-ID"] == logs[1].headers["X-Request-ID"]
+    assert logs[0].headers["Idempotency-Key"] == logs[1].headers["Idempotency-Key"]
     assert logs[0].content == logs[1].content

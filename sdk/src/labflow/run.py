@@ -74,21 +74,25 @@ class Run:
         return f"api/v1/sdk/runs/{self.id}"
 
     def upload_artifact(
-        self, path: str | Path, *, kind: str = "OTHER", request_id: str | None = None
+        self, path: str | Path, *, kind: str = "OTHER", idempotency_key: str | None = None
     ) -> int:
         self._running()
-        return self._client.upload_artifact(self.id, path, kind=kind, request_id=request_id)
+        return self._client.upload_artifact(
+            self.id, path, kind=kind, idempotency_key=idempotency_key
+        )
 
     def download_artifact(self, artifact_id: int, destination: str | Path) -> Path:
         return self._client.download_artifact(self.id, artifact_id, destination)
 
-    def params(self, parameters: Mapping[str, Scalar], *, request_id: str | None = None) -> None:
+    def params(
+        self, parameters: Mapping[str, Scalar], *, idempotency_key: str | None = None
+    ) -> None:
         self._running()
         self._client._request(
             "PUT",
             f"{self._path}/parameters",
             body={"parameters": validate.string_map(parameters, "Parameters")},
-            request_id=request_id,
+            idempotency_key=idempotency_key,
         )
 
     def metric(
@@ -99,7 +103,7 @@ class Run:
         epoch: int | None = None,
         elapsed_time: float | None = None,
         recorded_at: datetime | None = None,
-        request_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         self._running()
         metrics = {
@@ -120,7 +124,9 @@ class Run:
             body["epoch"] = validate.integer(epoch, "Epoch", validate.INT_MAX)
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/metrics", body=body, request_id=request_id)
+        self._client._request(
+            "POST", f"{self._path}/metrics", body=body, idempotency_key=idempotency_key
+        )
 
     def log(
         self,
@@ -129,7 +135,7 @@ class Run:
         level: str = "INFO",
         source: str = "USER",
         recorded_at: datetime | None = None,
-        request_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         self._running()
         level = validate.text(level, "Log level", 16).upper()
@@ -145,7 +151,9 @@ class Run:
         }
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/logs", body=body, request_id=request_id)
+        self._client._request(
+            "POST", f"{self._path}/logs", body=body, idempotency_key=idempotency_key
+        )
 
     def text(
         self,
@@ -154,7 +162,7 @@ class Run:
         *,
         step: int | None = None,
         recorded_at: datetime | None = None,
-        request_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         self._running()
         body = {
@@ -165,18 +173,20 @@ class Run:
             body["step"] = validate.integer(step, "Step")
         if recorded_at is not None:
             body["recordedAt"] = validate.timestamp(recorded_at)
-        self._client._request("POST", f"{self._path}/texts", body=body, request_id=request_id)
+        self._client._request(
+            "POST", f"{self._path}/texts", body=body, idempotency_key=idempotency_key
+        )
 
-    def finish(self, *, request_id: str | None = None) -> None:
+    def finish(self, *, idempotency_key: str | None = None) -> None:
         if self._state == "COMPLETED":
             return
         self._running()
         self._stop_telemetry()
-        self._client._request("POST", f"{self._path}/complete", request_id=request_id)
+        self._client._request("POST", f"{self._path}/complete", idempotency_key=idempotency_key)
         self._state = "COMPLETED"
         self._terminal()
 
-    def fail(self, error: str, *, request_id: str | None = None) -> None:
+    def fail(self, error: str, *, idempotency_key: str | None = None) -> None:
         error = validate.text(error, "Failure reason", 4000)
         error = self._client._redact(error)
         if self._state == "FAILED" and self._failure == error:
@@ -184,7 +194,7 @@ class Run:
         self._running()
         self._stop_telemetry()
         self._client._request(
-            "POST", f"{self._path}/fail", body={"error": error}, request_id=request_id
+            "POST", f"{self._path}/fail", body={"error": error}, idempotency_key=idempotency_key
         )
         self._state, self._failure = "FAILED", error
         self._terminal()
@@ -204,10 +214,10 @@ class Run:
         if self._owns_client:
             self._client.close()
 
-    def heartbeat(self, *, request_id: str | None = None) -> None:
+    def heartbeat(self, *, idempotency_key: str | None = None) -> None:
         """Refresh the server's lastHeartbeatAt using the server clock."""
         self._running()
-        self._client._request("POST", f"{self._path}/heartbeat", request_id=request_id)
+        self._client._request("POST", f"{self._path}/heartbeat", idempotency_key=idempotency_key)
 
     def __enter__(self) -> "Run":
         self._running()

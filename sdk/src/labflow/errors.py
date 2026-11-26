@@ -22,8 +22,10 @@ class RunStateError(LabflowError):
 class NetworkError(LabflowError):
     """A transport failure occurred; the server-side outcome can be unknown."""
 
-    def __init__(self, message: str, *, request_id: str | None = None, attempts: int = 1) -> None:
-        self.request_id = request_id
+    def __init__(
+        self, message: str, *, idempotency_key: str | None = None, attempts: int = 1
+    ) -> None:
+        self.idempotency_key = idempotency_key
         self.attempts = attempts
         super().__init__(message)
 
@@ -36,8 +38,15 @@ class ApiError(LabflowError):
     """A backend error with a status, code, and optional field validation errors."""
 
     def __init__(
-        self, status_code: int, code: str, message: str, errors: Mapping[str, str] | None = None
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        errors: Mapping[str, str] | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> None:
+        self.idempotency_key = idempotency_key
         self.status_code = status_code
         self.code = code
         self.message = message
@@ -58,4 +67,4 @@ class NotFoundError(ApiError):
 
 
 class ConflictError(ApiError):
-    """Run state, parameter value, or database state conflicts with the request (409)."""
+    """Run state, parameter value, or database state conflicts with the request (409/422)."""

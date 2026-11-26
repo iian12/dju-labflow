@@ -21,9 +21,6 @@ import lombok.*;
         },
         uniqueConstraints = {
             @UniqueConstraint(
-                    name = "uk_run_artifact_request",
-                    columnNames = {"run_id", "client_request_id"}),
-            @UniqueConstraint(
                     name = "uk_run_artifact_object",
                     columnNames = {"bucket", "object_key"})
         })
@@ -64,9 +61,6 @@ public class RunArtifactEntity extends AssignedIdEntity {
     @Column(updatable = false)
     private Long step;
 
-    @Column(name = "client_request_id", nullable = false, updatable = false, length = 64)
-    private String clientRequestId;
-
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -89,7 +83,6 @@ public class RunArtifactEntity extends AssignedIdEntity {
             String objectKey,
             ArtifactStatus status,
             Long step,
-            String clientRequestId,
             Instant createdAt,
             Instant uploadExpiresAt,
             Instant uploadedAt) {
@@ -105,7 +98,6 @@ public class RunArtifactEntity extends AssignedIdEntity {
         this.objectKey = objectKey;
         this.status = status;
         this.step = step;
-        this.clientRequestId = clientRequestId;
         this.createdAt = createdAt;
         this.uploadExpiresAt = uploadExpiresAt;
         this.uploadedAt = uploadedAt;

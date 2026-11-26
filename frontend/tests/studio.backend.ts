@@ -99,7 +99,7 @@ try {
   const secret=page.getByTestId('issued-key');await secret.waitFor();
   const key=(await secret.innerText()).trim();assert.ok(key.length>20);
   const sdk=async(path:string,body?:unknown,method='POST')=>{
-    const response=await context.request.fetch(`${base}/api/v1/sdk${path}`,{method,headers:{Authorization:`Bearer ${key}`,'X-Request-ID':crypto.randomUUID()},...(body!==undefined?{data:body}:{})});
+    const response=await context.request.fetch(`${base}/api/v1/sdk${path}`,{method,headers:{Authorization:`Bearer ${key}`,'Idempotency-Key':crypto.randomUUID()},...(body!==undefined?{data:body}:{})});
     assert.ok(response.ok(),`SDK ${path}: ${response.status()}`);const text=await response.text();return text?parseJson(text):undefined;
   };
   const created=await sdk('/runs',{name:'SDK persisted run',metadata:{framework:'actual SDK'}}) as {runId:string};
@@ -111,7 +111,7 @@ try {
   const payload = Buffer.from([0, 255, 128, 13, 10]);
   const artifactName = "학습 결과.bin";
   const uploaded = await context.request.post(`${base}/api/v1/sdk/runs/${created.runId}/artifacts?name=${encodeURIComponent(artifactName)}`, {
-    headers: {Authorization: `Bearer ${key}`, "X-Request-ID": crypto.randomUUID(), "Content-Type": "application/octet-stream"}, data: payload
+    headers: {Authorization: `Bearer ${key}`, "Idempotency-Key": crypto.randomUUID(), "Content-Type": "application/octet-stream"}, data: payload
   });
   assert.equal(uploaded.status(), 201);
   const {artifactId} = parseJson(await uploaded.text()) as {artifactId: string};

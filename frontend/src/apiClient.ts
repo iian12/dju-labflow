@@ -108,7 +108,7 @@ export function sanitize(body: string, secrets: string[] = [], hideCode = false)
 export async function requestApi(
   endpoint: Endpoint,
   request: { path: string; body?: string },
-  options: { apiKey: string; anonymous: boolean; autoCsrf: boolean; cookie: () => string; fetcher?: typeof fetch; onExchange: (entry: Exchange) => void; file?: File; requestId?: string; signal?: AbortSignal; onDownload?: (blob: Blob, name: string) => void },
+  options: { apiKey: string; anonymous: boolean; autoCsrf: boolean; cookie: () => string; fetcher?: typeof fetch; onExchange: (entry: Exchange) => void; file?: File; idempotencyKey?: string; signal?: AbortSignal; onDownload?: (blob: Blob, name: string) => void },
 ): Promise<{ data: unknown; exchange: Exchange }> {
   const fetcher = options.fetcher ?? fetch
   if (!request.path.startsWith('/api/v1/') || request.path.includes('\\') || /[\r\n]/.test(request.path)) throw new Error('지원하지 않는 API 경로입니다.')
@@ -123,7 +123,7 @@ export async function requestApi(
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (request.body !== undefined) headers['Content-Type'] = 'application/json'
   if (endpoint.file) headers['Content-Type'] = 'application/octet-stream'
-  if (isKey && endpoint.method !== 'GET' && (options.requestId || endpoint.file)) headers['X-Request-ID'] = options.requestId || crypto.randomUUID()
+  if (isKey && endpoint.method !== 'GET') headers['Idempotency-Key'] = options.idempotencyKey || crypto.randomUUID()
   if (isKey && options.apiKey.trim()) headers.Authorization = `Bearer ${options.apiKey.trim()}`
   const csrf = !isKey && endpoint.csrf && options.autoCsrf && !options.anonymous ? readCsrf(options.cookie()) : ''
   if (csrf) headers['X-XSRF-TOKEN'] = csrf

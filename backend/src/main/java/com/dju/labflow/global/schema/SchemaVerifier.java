@@ -32,15 +32,15 @@ public final class SchemaVerifier {
     private SchemaVerifier() {}
 
     public static void verify(String url, String user, String password) throws Exception {
-        verify(url, user, password, false);
+        verify(url, user, password, Integer.MAX_VALUE);
     }
 
     /** 이력이 없는 기존 DB의 V1 편입에는 이후 마이그레이션의 테이블을 요구하지 않는다. */
     public static void verifyVersionOne(String url, String user, String password) throws Exception {
-        verify(url, user, password, true);
+        verify(url, user, password, 1);
     }
 
-    private static void verify(String url, String user, String password, boolean versionOne)
+    public static void verify(String url, String user, String password, int schemaVersion)
             throws Exception {
         StandardServiceRegistry registry =
                 new StandardServiceRegistryBuilder()
@@ -59,10 +59,8 @@ public final class SchemaVerifier {
             scanner.addIncludeFilter(new AnnotationTypeFilter(Entity.class));
             for (BeanDefinition entity : scanner.findCandidateComponents("com.dju.labflow")) {
                 Class<?> type = Class.forName(entity.getBeanClassName());
-                if (versionOne
-                        && type
-                                == com.dju.labflow.run.run.infrastructure.persistence
-                                        .RunMetricSummaryEntity.class) continue;
+                SchemaSince since = type.getAnnotation(SchemaSince.class);
+                if (since != null && since.value() > schemaVersion) continue;
                 sources.addAnnotatedClass(type);
             }
             Metadata metadata = sources.buildMetadata();

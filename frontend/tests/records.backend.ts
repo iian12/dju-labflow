@@ -33,7 +33,7 @@ try {
   assert.match(queries.at(-1)!, /before=/);
   const write = async (message: string) => {
     const response = await fetch(`${backend}/api/v1/sdk/runs/${run}/logs`, {
-      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() },
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
       body: JSON.stringify({ message, source: 'USER', level: 'INFO' }),
     });
     assert.equal(response.status, 204);

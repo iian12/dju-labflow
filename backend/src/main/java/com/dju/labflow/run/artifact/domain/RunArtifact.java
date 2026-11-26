@@ -24,7 +24,6 @@ public class RunArtifact {
     private final String objectKey;
     private ArtifactStatus status;
     private final Long step;
-    private final String clientRequestId;
     private final Instant createdAt;
     private final Instant uploadExpiresAt;
     private Instant uploadedAt;
@@ -43,7 +42,6 @@ public class RunArtifact {
             String objectKey,
             ArtifactStatus status,
             Long step,
-            String clientRequestId,
             Instant createdAt,
             Instant uploadExpiresAt,
             Instant uploadedAt,
@@ -63,7 +61,6 @@ public class RunArtifact {
         this.objectKey = InputValidation.text(objectKey, "Object key", 512);
         this.status = InputValidation.required(status, "Artifact status");
         this.step = RunValidation.nonNegative(step, "Step");
-        this.clientRequestId = InputValidation.text(clientRequestId, "Client request ID", 64);
         this.createdAt = InputValidation.required(createdAt, "Creation time");
         this.uploadExpiresAt = InputValidation.required(uploadExpiresAt, "Upload expiry time");
         this.uploadedAt = uploadedAt;
@@ -81,7 +78,6 @@ public class RunArtifact {
             String bucket,
             String objectKey,
             Long step,
-            String clientRequestId,
             Instant createdAt,
             Instant uploadExpiresAt) {
         return new RunArtifact(
@@ -97,7 +93,6 @@ public class RunArtifact {
                 objectKey,
                 ArtifactStatus.UPLOADING,
                 step,
-                clientRequestId,
                 createdAt,
                 uploadExpiresAt,
                 null,
@@ -117,7 +112,6 @@ public class RunArtifact {
             String objectKey,
             ArtifactStatus status,
             Long step,
-            String clientRequestId,
             Instant createdAt,
             Instant uploadExpiresAt,
             Instant uploadedAt,
@@ -135,7 +129,6 @@ public class RunArtifact {
                 objectKey,
                 status,
                 step,
-                clientRequestId,
                 createdAt,
                 uploadExpiresAt,
                 uploadedAt,

@@ -6,6 +6,7 @@ import com.dju.labflow.global.handler.CustomAccessDeniedHandler;
 import com.dju.labflow.global.handler.CustomAuthenticationEntryPoint;
 import com.dju.labflow.global.handler.SpaCsrfTokenRequestHandler;
 import com.dju.labflow.project.key.infrastructure.security.ProjectApiKeyAuthenticationFilter;
+import com.dju.labflow.sdk.idempotency.IdempotencyFilter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -36,6 +37,7 @@ public class SecurityConfig {
     private final ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter;
     private final AuthCookieProperties authCookieProperties;
     private final ManagementScrapeRequestMatcher managementScrapeRequestMatcher;
+    private final IdempotencyFilter idempotencyFilter;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
@@ -43,13 +45,15 @@ public class SecurityConfig {
             CustomAccessDeniedHandler customAccessDeniedHandler,
             ProjectApiKeyAuthenticationFilter projectApiKeyAuthenticationFilter,
             AuthCookieProperties authCookieProperties,
-            ManagementScrapeRequestMatcher managementScrapeRequestMatcher) {
+            ManagementScrapeRequestMatcher managementScrapeRequestMatcher,
+            IdempotencyFilter idempotencyFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.customAccessDeniedHandler = customAccessDeniedHandler;
         this.projectApiKeyAuthenticationFilter = projectApiKeyAuthenticationFilter;
         this.authCookieProperties = authCookieProperties;
         this.managementScrapeRequestMatcher = managementScrapeRequestMatcher;
+        this.idempotencyFilter = idempotencyFilter;
     }
 
     @Bean
@@ -148,6 +152,7 @@ public class SecurityConfig {
                 .addFilterBefore(
                         projectApiKeyAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(idempotencyFilter, ProjectApiKeyAuthenticationFilter.class)
                 .addFilterBefore(
                         jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
@@ -171,6 +176,14 @@ public class SecurityConfig {
     public FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> apiKeyFilterRegistration() {
         FilterRegistrationBean<ProjectApiKeyAuthenticationFilter> registration =
                 new FilterRegistrationBean<>(projectApiKeyAuthenticationFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<IdempotencyFilter> idempotencyFilterRegistration() {
+        FilterRegistrationBean<IdempotencyFilter> registration =
+                new FilterRegistrationBean<>(idempotencyFilter);
         registration.setEnabled(false);
         return registration;
     }

@@ -81,7 +81,6 @@ class RunArtifactDomainTests {
                                         "runs/1/artifacts/1/content",
                                         ArtifactStatus.READY,
                                         1L,
-                                        "request-1",
                                         NOW,
                                         NOW.plusSeconds(60),
                                         null,
@@ -102,7 +101,6 @@ class RunArtifactDomainTests {
                                         "runs/1/artifacts/1/content",
                                         ArtifactStatus.READY,
                                         1L,
-                                        "request-1",
                                         NOW,
                                         NOW.plusSeconds(60),
                                         NOW.plusSeconds(1),
@@ -121,7 +119,6 @@ class RunArtifactDomainTests {
                 "files",
                 "runs/1/artifacts/1/content",
                 1L,
-                "request-1",
                 NOW,
                 expiresAt);
     }

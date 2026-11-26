@@ -1,6 +1,6 @@
 # DB 스키마 관리
 
-현재 코드의 공식 기준은 `src/main/resources/db/migration`의 V1과 V2입니다. V1은 사용자·프로젝트·키·토큰·이메일 인증·요청 제한·Run과 기록·파일·SDK 멱등성까지 **16개 테이블**을 포함합니다. V2는 지표별 요약 테이블 `run_metric_summary`를 추가하고 기존 이력을 채웁니다. 적용된 V1은 수정하지 않습니다.
+현재 코드의 공식 기준은 `src/main/resources/db/migration`의 V1~V3입니다. V1은 사용자·프로젝트·키·토큰·이메일 인증·요청 제한·Run과 기록·파일·SDK 멱등성까지 **16개 테이블**을 포함합니다. V2는 지표별 요약 테이블 `run_metric_summary`를 추가하고 기존 이력을 채웁니다. V3는 공통 멱등 응답 원장으로 전환합니다. 적용된 V1/V2는 수정하지 않습니다.
 
 Flyway가 DDL 변경을 담당하고 JPA는 `validate`로 매핑만 검사합니다. 빈 DB는 백엔드 시작 시 V1부터 최신 버전까지 적용하고, 이후 시작에서는 미적용 버전만 실행합니다. `APP_PROFILE=prod`는 `JPA_DDL_AUTO=update`가 설정되어 있어도 `validate`를 사용합니다. 일반 H2 회귀 테스트만 Flyway를 끄고 `create-drop`을 유지합니다.
 
@@ -13,12 +13,20 @@ Flyway가 DDL 변경을 담당하고 JPA는 `validate`로 매핑만 검사합니
 - 데이터가 큰 DB는 복제본에서 backfill 시간·임시 디스크 사용량을 측정하고 점검 시간을 확보합니다. MariaDB DDL은 암묵적으로 커밋되므로 V2 전체가 원자적으로 롤백되는 것은 아닙니다. 실패 시 Flyway 이력과 실제 테이블 상태를 확인하고 원인을 해결한 뒤 복구해야 합니다.
 - V2 이전 앱으로 롤백한 뒤 기록이 추가되었다면, 다시 새 앱을 시작하기 전에 모든 서버를 중지한 상태에서 `rebuild-run-metric-summary.sql`을 실행하고 기존 집계와 비교합니다. SQL 오류 시 중단·ROLLBACK하는 클라이언트를 사용하고 `--force`로 계속 실행하지 않습니다. 원본은 삭제하지 않으며 적용된 V2를 수정하거나 재실행하지 않습니다.
 
+## V3 멱등 응답 원장 전환
+
+- 모든 이전 SDK writer와 서버를 중지하고 DB·Artifact 파일을 백업합니다. V3는 `idempotency_request`를 생성하고 `sdk_request_entity`, `run_artifact_entity.client_request_id` 및 해당 유니크 제약을 제거합니다. 기존 실험·이력·Artifact 메타데이터와 실제 파일은 보존합니다. 멱등키는 도메인 테이블에 중복 보관하지 않습니다.
+- SDK 0.4.0과 함께 전환합니다. `Idempotency-Key`만 지원하며 이전 `X-Request-ID`는 호환되지 않습니다. 기존 멱등 원장은 폐기되므로 과거 요청이나 과거 오프라인 큐를 새 프로토콜로 무조건 재전송하면 중복 쓰기가 됩니다. SDK는 별도 `pending-v2.sqlite3`를 사용해 기존 큐를 자동 재생하지 않습니다.
+- 새 앱 시작 후 Flyway 성공 V3, JPA validate, 주요 SDK 쓰기·같은 응답 재생·파일 다운로드를 확인합니다. `schemaCheck`는 현재 Flyway 버전에 도입된 엔티티만 검사합니다.
+- MariaDB DDL은 암묵적으로 커밋됩니다. **이전 앱으로 파일만 되돌려서는 롤백되지 않으며, V3 이전 DB 백업을 복원하고 기존 SDK와 함께 되돌려야 합니다.** 전환 후 쓴 데이터가 있다면 먼저 별도로 보존·대조합니다. 복원 없이 이전 앱과 새 앱을 동시에 운영하지 않습니다.
+- 실제 MariaDB 통합 테스트는 V2 기존 데이터 보존, V3 스키마 검증, NOWAIT 경합과 lease 복구·응답 재생·내용 충돌을 검사합니다.
+
 ## 새 DB
 
 1. 빈 MariaDB 데이터베이스와 접속 계정을 준비합니다. 데이터베이스 자체와 계정 생성은 Flyway의 범위가 아닙니다.
 2. 기존 `.env` 형식으로 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` 및 애플리케이션 설정을 지정합니다.
-3. 백엔드를 실행합니다. Flyway V1 → JPA 검증 → HTTP 서버 준비 순서입니다.
-4. `flyway_schema_history`에 성공한 버전 1이 있는지 확인합니다.
+3. 백엔드를 실행합니다. Flyway V1 → V2 → V3 → JPA 검증 → HTTP 서버 준비 순서입니다.
+4. `flyway_schema_history`에 성공한 버전 1~3이 있는지 확인합니다.
 
 V1을 직접 실행한 뒤 서버를 시작하지 마세요. 이 경우 이력이 없는 기존 DB로 취급되어 자동 시작이 거부됩니다. 이 폴더의 과거 `runs.sql`, `email-verifications.sql`, `auth-request-limits.sql` 등을 신규 설치에 추가 실행할 필요도 없습니다.
 

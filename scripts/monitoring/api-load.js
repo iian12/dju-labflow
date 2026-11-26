@@ -91,7 +91,7 @@ function sdk(operation, path, body, expected = 204, method = 'POST') {
   const requestId = `${context.cycleId}-${__VU}-${__ITER}-${operation}`;
   const response = http.request(method, context.base + '/api/v1/sdk' + path,
     body === undefined ? null : JSON.stringify(body), {
-      headers: { Authorization: 'Bearer ' + context.apiKey, 'Content-Type': 'application/json', 'X-Request-ID': requestId },
+      headers: { Authorization: 'Bearer ' + context.apiKey, 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
       tags: tags(operation, 'write'), timeout: '20s',
     });
   check(response, { [operation + ' status']: value => value.status === expected });
@@ -139,7 +139,7 @@ export default function () {
   }
   if (__ITER === 0) {
     const response = http.post(context.base + '/api/v1/sdk' + run + '/artifacts?name=k6-' + __VU + '.bin', payload, {
-      headers: { Authorization: 'Bearer ' + context.apiKey, 'Content-Type': 'application/octet-stream', 'X-Request-ID': `${context.cycleId}-${__VU}-artifact` },
+      headers: { Authorization: 'Bearer ' + context.apiKey, 'Content-Type': 'application/octet-stream', 'Idempotency-Key': `${context.cycleId}-${__VU}-artifact` },
       tags: tags('artifact-upload', 'file'), timeout: '30s',
     });
     check(response, { 'artifact upload status': value => value.status === 201 });

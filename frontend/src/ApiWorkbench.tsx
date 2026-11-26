@@ -35,7 +35,7 @@ function ApiWorkbench({ selectedId, operations, verifyAccess, sessionChanged }: 
   const [context, setContext] = useState<Context>(emptyContext);
   const [apiKey, setApiKey] = useState(''), [showKey, setShowKey] = useState(false);
   const [anonymous, setAnonymous] = useState(false), [autoCsrf, setAutoCsrf] = useState(true);
-  const [requestId, setRequestId] = useState(''), [file, setFile] = useState<File>();
+  const [idempotencyKey, setIdempotencyKey] = useState(''), [file, setFile] = useState<File>();
   const [history, setHistory] = useState<Exchange[]>([]), [selectedExchange, setSelectedExchange] = useState<Exchange>();
   const [pending, setPending] = useState(false), [message, setMessage] = useState('');
   const [rawMode, setRawMode] = useState(false), [raw, setRaw] = useState('');
@@ -71,8 +71,10 @@ function ApiWorkbench({ selectedId, operations, verifyAccess, sessionChanged }: 
       // The separate ADMIN check is never controlled by anonymous/CSRF test options.
       await verifyAccess(current.signal);
       current.signal.throwIfAborted();
+      const stableKey = endpoint.auth === 'key' && endpoint.method !== 'GET' ? idempotencyKey || crypto.randomUUID() : undefined;
+      if (stableKey && !idempotencyKey) setIdempotencyKey(stableKey);
       const result = await requestApi(endpoint, prepared, {
-        apiKey, anonymous, autoCsrf, file, requestId, signal: current.signal, cookie: () => document.cookie,
+        apiKey, anonymous, autoCsrf, file, idempotencyKey: stableKey, signal: current.signal, cookie: () => document.cookie,
         onExchange: entry => { if (!current.signal.aborted) { setHistory(previous => [entry, ...previous].slice(0, 40)); setSelectedExchange(entry); } },
         onDownload: (blob, name) => { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); },
       });
@@ -115,7 +117,7 @@ function ApiWorkbench({ selectedId, operations, verifyAccess, sessionChanged }: 
           {!rawMode && endpoint.fields?.map(field => <label key={field.name}>{field.label}{field.required ? ' *' : ''}{field.type === 'select' ? <select value={fieldValue(field)} onChange={event => changeField(field,event.target.value)}>{field.options?.map(option => <option key={option}>{option}</option>)}</select> : ['json','textarea'].includes(field.type ?? '') ? <textarea rows={field.type === 'json' ? 5 : 3} value={fieldValue(field)} onChange={event => changeField(field,event.target.value)} required={field.required} spellCheck={false}/> : <input type={['email','password'].includes(field.type ?? '') ? field.type : 'text'} autoComplete="off" value={fieldValue(field)} required={field.required} onChange={event => changeField(field,event.target.value)}/>} {field.help && <small>{field.help}</small>}</label>)}
           {rawMode && <label>원본 JSON 요청 본문<textarea rows={10} value={raw} onChange={event => setRaw(event.target.value)} required spellCheck={false}/></label>}
           {endpoint.file && <label>업로드할 파일<input key={endpoint.id} type="file" onChange={event => setFile(event.target.files?.[0])} required/></label>}
-          {endpoint.auth === 'key' && endpoint.method !== 'GET' && <label>Request ID{endpoint.file ? ' (비우면 자동 생성)' : ' (선택)'}<input value={requestId} maxLength={64} pattern="[A-Za-z0-9_-]+" onChange={event => setRequestId(event.target.value)} spellCheck={false}/></label>}
+          {endpoint.auth === 'key' && endpoint.method !== 'GET' && <><label>Idempotency-Key (비우면 자동 생성)<input value={idempotencyKey} maxLength={300} pattern="[!-~]+" onChange={event => setIdempotencyKey(event.target.value)} spellCheck={false}/></label><button type="button" onClick={() => setIdempotencyKey(crypto.randomUUID())}>새 멱등키</button><small>같은 요청을 재시도할 때는 키와 본문을 유지하세요.</small></>}
           {!endpoint.fields && <p className="api-no-body">요청 본문이 없습니다.</p>}
           {endpoint.fields && !endpoint.query && <label className="api-check"><input type="checkbox" checked={rawMode} onChange={event => { try { if (event.target.checked) setRaw(prepare(endpoint,values[endpoint.id],context).body ?? '{}'); setRawMode(event.target.checked); } catch (error) { setMessage(error instanceof Error ? error.message : '식별자를 입력하세요.'); } }}/>JSON 직접 편집</label>}
         </fieldset>

@@ -39,7 +39,7 @@ public class ProjectContentsRepositoryImpl implements ProjectContentsRepository 
         events.publishEvent(
                 new com.dju.labflow.run.artifact.application.LocalArtifactService.LocalFilesDeleted(
                         localIds));
-        execute("delete from sdk_request_entity where project_id = :projectId", projectId);
+        execute("delete from idempotency_request where project_id = :projectId", projectId);
         execute(
                 "delete from run_system_metric_gpu where system_metric_id in (select id from run_system_metric_entity where run_id in ("
                         + runs

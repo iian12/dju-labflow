@@ -45,6 +45,13 @@ class LocalArtifactUploadTests {
     }
 
     @Autowired LocalArtifactService files;
+
+    @Autowired
+    com.dju.labflow.run.artifact.application.LocalArtifactTransactions uploadTransactions;
+
+    @Autowired RunAccessPolicy access;
+    @Autowired com.dju.labflow.sdk.idempotency.IdempotencyStore ledger;
+    @Autowired com.dju.labflow.project.key.application.ProjectApiKeyService issuance;
     @Autowired RunArtifactRepository artifacts;
     @Autowired ProjectService projects;
     @Autowired RunService runs;
@@ -72,7 +79,16 @@ class LocalArtifactUploadTests {
         project =
                 projects.create(
                         owner, new ProjectCreateCommand("uploads", "", ProjectVisibility.PRIVATE));
-        principal = new ProjectApiKeyPrincipal(ProjectApiKeyId.of(ids.nextId()), project, owner);
+        principal =
+                new ProjectApiKeyPrincipal(
+                        issuance.issue(
+                                        owner,
+                                        project,
+                                        new com.dju.labflow.project.key.application
+                                                .IssueProjectApiKeyCommand("uploads"))
+                                .apiKeyId(),
+                        project,
+                        owner);
         run = runs.create(principal, new RunCreateCommand("uploading", Map.of()));
     }
 
@@ -88,6 +104,50 @@ class LocalArtifactUploadTests {
                                 em.createQuery("delete from UserEntity u where u.id = :id")
                                         .setParameter("id", owner.value())
                                         .executeUpdate());
+    }
+
+    @Test
+    void lostCompletionAcknowledgmentKeepsTheCommittedFileAndResponse() throws Exception {
+        com.dju.labflow.run.artifact.application.LocalArtifactTransactions interrupted =
+                org.mockito.Mockito.mock(
+                        com.dju.labflow.run.artifact.application.LocalArtifactTransactions.class,
+                        org.mockito.AdditionalAnswers.delegatesTo(uploadTransactions));
+        org.mockito.Mockito.doAnswer(
+                        invocation -> {
+                            uploadTransactions.complete(
+                                    invocation.getArgument(0),
+                                    invocation.getArgument(1),
+                                    invocation.getArgument(2),
+                                    invocation.getArgument(3));
+                            throw new IllegalStateException(
+                                    "Simulated lost commit acknowledgement");
+                        })
+                .when(interrupted)
+                .complete(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any());
+        LocalArtifactService recovering =
+                new LocalArtifactService(
+                        access, artifacts, interrupted, directory.toString(), 16, 12);
+        com.dju.labflow.sdk.idempotency.IdempotencyStore.Claim claim =
+                ledger.claim(principal, "d".repeat(64), "e".repeat(64));
+        byte[] payload = new byte[] {1, 2, 3, 4};
+        RunArtifact result =
+                recovering.upload(
+                        principal,
+                        run,
+                        "committed.bin",
+                        ArtifactKind.OTHER,
+                        claim,
+                        payload.length,
+                        new ByteArrayInputStream(payload));
+        assertThat(result.getStatus()).isEqualTo(ArtifactStatus.READY);
+        assertThat(Files.readAllBytes(directory.resolve(result.getId().value().toString())))
+                .isEqualTo(payload);
+        assertThat(artifacts.findReadyByRunId(run, 10)).hasSize(1);
+        assertThat(ledger.claim(principal, "d".repeat(64), "e".repeat(64)).replay()).isTrue();
     }
 
     @Test
@@ -131,8 +191,7 @@ class LocalArtifactUploadTests {
                                                 "first",
                                                 8,
                                                 new ByteArrayInputStream(new byte[8])))
-                        .isInstanceOf(
-                                com.dju.labflow.run.run.exception.RunStateConflictException.class);
+                        .isInstanceOf(com.dju.labflow.sdk.idempotency.IdempotencyException.class);
             } finally {
                 input.release.countDown();
             }
@@ -150,8 +209,7 @@ class LocalArtifactUploadTests {
                                             8,
                                             new ByteArrayInputStream(
                                                     "different".substring(0, 8).getBytes())))
-                    .isInstanceOf(
-                            com.dju.labflow.run.run.exception.RunStateConflictException.class);
+                    .isInstanceOf(com.dju.labflow.sdk.idempotency.IdempotencyException.class);
         }
     }
 
@@ -159,8 +217,9 @@ class LocalArtifactUploadTests {
     void failedTransferReleasesCapacityAndRequestId() throws Exception {
         assertThatThrownBy(() -> upload(run, "retry", 8, new ByteArrayInputStream(new byte[2])))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(artifacts.findByRunIdAndClientRequestId(run, "retry")).isEmpty();
-        RunArtifact ready = upload(run, "retry", 12, new ByteArrayInputStream(new byte[12]));
+        assertThat(artifacts.findByRunId(run, 100)).isEmpty();
+        RunArtifact ready =
+                upload(run, "retry-new-operation", 12, new ByteArrayInputStream(new byte[12]));
         assertThat(ready.getStatus()).isEqualTo(ArtifactStatus.READY);
         try (Stream<Path> paths = Files.list(directory)) {
             assertThat(paths.filter(path -> path.toString().endsWith(".part"))).isEmpty();
@@ -216,7 +275,20 @@ class LocalArtifactUploadTests {
     private RunArtifact upload(RunId runId, String request, long size, InputStream input)
             throws IOException {
         return files.upload(
-                principal, runId, "weights.bin", ArtifactKind.MODEL, request, size, input);
+                principal,
+                runId,
+                "weights.bin",
+                ArtifactKind.MODEL,
+                ledger.claim(
+                        principal,
+                        com.dju.labflow.sdk.idempotency.IdempotencyFilter.hash(
+                                (principal.apiKeyId() + "/" + runId + "/" + request)
+                                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        com.dju.labflow.sdk.idempotency.IdempotencyFilter.hash(
+                                Long.toString(size)
+                                        .getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+                size,
+                input);
     }
 
     @Test
@@ -234,7 +306,6 @@ class LocalArtifactUploadTests {
                         "local",
                         id.value().toString(),
                         null,
-                        "abandoned",
                         old,
                         old.plusSeconds(86400)));
         Files.createDirectories(directory);

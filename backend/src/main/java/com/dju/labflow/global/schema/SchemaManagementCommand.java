@@ -51,11 +51,11 @@ public final class SchemaManagementCommand {
             return;
         }
         org.flywaydb.core.api.MigrationInfo current = flyway.info().current();
-        if (current == null
-                || current.getVersion()
-                                .compareTo(org.flywaydb.core.api.MigrationVersion.fromVersion("2"))
-                        < 0) SchemaVerifier.verifyVersionOne(url, user, password);
-        else SchemaVerifier.verify(url, user, password);
+        int version =
+                current == null
+                        ? 1
+                        : Integer.parseInt(current.getVersion().getVersion().split("\\.")[0]);
+        SchemaVerifier.verify(url, user, password, version);
         if (action.equals("baseline")) {
             if (flyway.info().current() != null)
                 throw new IllegalStateException(
