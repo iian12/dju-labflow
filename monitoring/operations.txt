@@ -74,6 +74,20 @@ First endurance test (same fixture and functional preparation as above):
   status.json and monitor.ndjson contain live counts and server samples;
   k6-raw.ndjson.gz streams compressed raw data directly to disk.
   The final report includes warmup/steady/recovery bands and 5-minute windows.
+  A 30-minute comparison uses run-cycle.ps1 -Profile summary-30m: 600 seconds
+  ramp-up, 1199 seconds at 10 VUs, one-second ramp-down, then 60 seconds recovery.
+  It also compares the 20 metric-summary rows against the original history.
+  Control HTTP failures are recorded in http-failures.ndjson and report.httpFailures:
+  phase, operation, method, origin/path, request/body stage, status if received,
+  elapsed time and sanitized nested error names/codes (including AggregateError).
+  Credentials, request bodies, query strings and raw error messages are omitted.
+  report.phaseHistory and postLoadChecks distinguish final refresh, auth/me and
+  metric collection failures. Control requests have one attempt: refresh/logout
+  or writes are not automatically retried after a potentially lost response.
+  httpFailures also includes handled probe errors: initial k6 ECONNREFUSED before
+  its control listener starts is allowed during startup. report.failures remains
+  the list of errors that affect the overall verdict.
+  Check the new diagnostics with: node --test scripts/monitoring/observe-http.test.mjs
   Stops: temperature >=80 C, Pi available RAM <200 MiB, NVMe free <5 GiB,
   PC recording disk free <2 GiB, three consecutive monitoring/session failures,
   or active run deadline. The soak profile records transient HTTP failures for

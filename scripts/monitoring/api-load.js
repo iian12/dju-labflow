@@ -36,13 +36,14 @@ export const options = {
   thresholds: {
     // Endurance runs retain transient outages for the entire observation window.
     // The same error-rate threshold still fails the final result.
-    'http_req_failed{target:labflow}': [{ threshold: 'rate<0.01', abortOnFail: profile.name !== 'soak', delayAbortEval: '30s' }],
+    'http_req_failed{target:labflow}': [{ threshold: 'rate<0.01', abortOnFail: !profile.endurance, delayAbortEval: '30s' }],
     checks: ['rate>0.99'],
     'http_req_duration{target:labflow}': ['p(95)<1000', 'p(99)<2000'],
     'http_reqs{target:labflow}': ['count>0'],
     'http_req_duration{kind:read}': ['p(95)<500'],
     'http_req_duration{kind:write}': ['p(95)<1000'],
     'http_req_duration{kind:file}': ['p(95)<2000'],
+    ...(profile.summaryThresholds ? { 'http_req_duration{endpoint:run-summaries}': ['p(95)<500', 'p(99)<1000'] } : {}),
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };

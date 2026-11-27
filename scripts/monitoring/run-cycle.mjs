@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { loadProfile } from './load-profile.mjs';
+import { observeHttp } from './observe-http.mjs';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const profile=loadProfile(process.env.LABFLOW_LOAD_PROFILE || 'smoke');
@@ -28,6 +29,15 @@ const failures=[];
 const report={cycleId,base,profile:profile.name,startedAt:new Date(createdAt).toISOString(),functional:null,resources:[],cleanup:{},passed:false};
 report.controlTransport=profile.name==='smoke'?'public HTTPS':'encrypted SSH to loopback gateway';
 let projectId,apiKey;
+let operationPhase='prepare';
+async function stage(name){
+  operationPhase=name;
+  (report.phaseHistory??=[]).push({phase:name,time:new Date().toISOString()});
+}
+const observed=(url,options,operation,consume)=>observeHttp({url,options,operation,phase:operationPhase,consume,onFailure:async details=>{
+  (report.httpFailures??=[]).push(details);
+  await appendFile(path.join(cycleDirectory,'http-failures.ndjson'),JSON.stringify(details)+'\n');
+}});
 const runIds=[];
 const contextPath=path.join(cycleDirectory,'private-context.json');
 const rawPath=path.join(cycleDirectory,'k6-raw.ndjson.gz');
@@ -38,15 +48,17 @@ function parseJson(text){
     /^-?\d+$/.test(token)&&!Number.isSafeInteger(Number(token))?JSON.stringify(token):token));
 }
 async function request(method,url,body,headers={},expected=[200,201,204]){
-  const response=await fetch(url,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(30000)});
-  for(const cookie of response.headers.getSetCookie()){
-    const first=cookie.split(';',1)[0],separator=first.indexOf('=');
-    cookieJar.set(first.slice(0,separator),first.slice(separator+1));
-  }
-  const text=await response.text();
+  const {response,text}=await observed(url,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(30000)},'control',async response=>{
+    for(const cookie of response.headers.getSetCookie()){
+      const first=cookie.split(';',1)[0],separator=first.indexOf('=');
+      cookieJar.set(first.slice(0,separator),first.slice(separator+1));
+    }
+    return {response,text:await response.text()};
+  });
   assert.ok(expected.includes(response.status),`${method} ${new URL(url).pathname}: ${response.status}`);
   return text?parseJson(text):undefined;
 }
+
 const cookies=()=>[...cookieJar].map(([key,value])=>`${key}=${value}`).join('; ');
 const web=async(method,route,body)=>request(method,controlBase+route,body,{
   Cookie:cookies(),'Content-Type':'application/json',
@@ -55,11 +67,11 @@ const web=async(method,route,body)=>request(method,controlBase+route,body,{
 const sdk=(method,route,body)=>request(method,controlBase+'/api/v1/sdk'+route,body,{
   Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()
 });
-const prom=async(expr,start,end)=>{
+const prom=async(expr,start,end,name='query')=>{
   const route=start===undefined?'/api/v1/query':'/api/v1/query_range';
   const query=new URLSearchParams({query:expr,...(start===undefined?{}:{start:String(start),end:String(end),step:'5s'})});
-  const response=await fetch('http://127.0.0.1:9090'+route+'?'+query,{signal:AbortSignal.timeout(10000)});
-  const json=await response.json();assert.equal(json.status,'success',expr);return json.data.result;
+  const json=await observed('http://127.0.0.1:9090'+route+'?'+query,{signal:AbortSignal.timeout(10000)},'metric:'+name,response=>response.json());
+  assert.equal(json.status,'success',name);return json.data.result;
 };
 const metrics={
   cpu:'100 * (1 - avg(rate(node_cpu_seconds_total{job="raspberry-pi",mode="idle"}[1m])))',
@@ -79,7 +91,7 @@ const metrics={
 async function sample(){
   const observation={time:Date.now()};
   await Promise.all(Object.entries(metrics).map(async([name,expr])=>{
-    const values=await prom(expr);observation[name]=values.length?Number(values[0].value[1]):null;
+    const values=await prom(expr,undefined,undefined,name);observation[name]=values.length?Number(values[0].value[1]):null;
   }));
   for(const name of ['temperature','availableMemory','targetsUp','collectorAge','nvmeAvailable'])
     assert.ok(Number.isFinite(observation[name]),'Missing safety metric: '+name);
@@ -109,9 +121,9 @@ async function checkpoint(phase,observation,live){
   await appendFile(path.join(cycleDirectory,'monitor.ndjson'),JSON.stringify(status)+'\n');
 }
 async function liveMetrics(){
-  const response=await fetch('http://127.0.0.1:6565/v1/metrics',{signal:AbortSignal.timeout(5000)});
+  const {response,body}=await observed('http://127.0.0.1:6565/v1/metrics',{signal:AbortSignal.timeout(5000)},'k6-control',async response=>({response,body:await response.json()}));
   assert.equal(response.status,200);
-  const body=await response.json(),result={};
+  const result={};
   for(const metric of body.data??[]){
     const attributes=metric.attributes;
     const name=metric.id.replace('{target:labflow}','');
@@ -126,10 +138,9 @@ async function connectivityProbe(){
   await Promise.all([['external',base],['direct',controlBase]].map(async([name,url])=>{
     const started=Date.now();
     try{
-      const response=await fetch(url+'/api/v1/auth/csrf',{signal:AbortSignal.timeout(5000)});
-      result[name]={status:response.status,milliseconds:Date.now()-started};
-      await response.arrayBuffer();
-    }catch(error){result[name]={status:0,milliseconds:Date.now()-started,error:error.cause?.code??error.name};}
+      const status=await observed(url+'/api/v1/auth/csrf',{signal:AbortSignal.timeout(5000)},'probe:'+name,async response=>{await response.arrayBuffer();return response.status;});
+      result[name]={status,milliseconds:Date.now()-started};
+    }catch(error){result[name]={status:0,milliseconds:Date.now()-started,error:error.details?.error??error.cause?.code??error.name};}
   }));
   (report.connectivityProbes??=[]).push(result);return result;
 }
@@ -225,6 +236,7 @@ try{
     await new Promise((resolve,reject)=>{sessionRelay.once('error',reject);sessionRelay.listen(6567,'127.0.0.1',resolve);});
     assert.equal((await fetch('http://127.0.0.1:6567/session')).status,403,'Private relay must reject unsigned requests');
   }
+  await stage('load');
   report.loadStartedAt=new Date().toISOString();
   report.expectedFinishAt=new Date(Date.parse(report.loadStartedAt)+(activeSeconds+profile.recoverySeconds)*1000).toISOString();
   report.phases=[
@@ -236,8 +248,9 @@ try{
     loadStartedAtMs:Date.parse(report.loadStartedAt),sessionUrl:'http://127.0.0.1:6567/session',sessionToken}),{mode:0o600});
   report.workload={virtualUsers:[1,5,10],durationSeconds:activeSeconds,recoverySeconds:profile.recoverySeconds,
     warmupSeconds:profile.warmupSeconds,steadySeconds:profile.holdSeconds,sleepPerIterationSeconds:1,seedRuns:10,seedMetrics:20,
-    errorRateAborts:profile.name!=='soak',
-    thresholds:{unexpectedErrorRate:'<1%',overallP95:'<1000ms',overallP99:'<2000ms',readP95:'<500ms',writeP95:'<1000ms',fileP95:'<2000ms'}};
+    errorRateAborts:!profile.endurance,
+    thresholds:{unexpectedErrorRate:'<1%',overallP95:'<1000ms',overallP99:'<2000ms',readP95:'<500ms',writeP95:'<1000ms',fileP95:'<2000ms',
+      ...(profile.summaryThresholds?{runSummariesP95:'<500ms',runSummariesP99:'<1000ms'}:{})}};
   const log=createWriteStream(path.join(cycleDirectory,'k6-console.log'));
   const child=spawn('C:/Program Files/k6/k6.exe',['run','--quiet','--no-usage-report','--address','127.0.0.1:6565','--out','json='+rawPath,path.join(root,'scripts/monitoring/api-load.js')],{
     cwd:root,env:{...process.env,LABFLOW_LOAD_CONTEXT:contextPath,LABFLOW_K6_SUMMARY:summaryPath},stdio:['ignore','pipe','pipe']
@@ -296,9 +309,10 @@ try{
   if(report.k6ExitCode!==0)failures.push('k6 returned '+report.k6ExitCode+'; inspect threshold results');
   if(profile.name!=='smoke'&&report.k6ExitCode===0){
     assert.ok((report.raw.counters.session_refreshes??0)>=10,'All VUs must exercise session refresh');
-    if(profile.name==='soak')assert.deepEqual(Object.keys(report.raw.sessionClients).sort(),Array.from({length:10},(_,i)=>String(i+1)).sort());
+    if(profile.endurance)assert.deepEqual(Object.keys(report.raw.sessionClients).sort(),Array.from({length:10},(_,i)=>String(i+1)).sort());
   }
   if(report.completedLoadDuration && [0,99].includes(report.k6ExitCode)){
+    await stage('recovery');
     const recoveryDeadline=Date.parse(report.loadStartedAt)+(activeSeconds+profile.recoverySeconds)*1000;
     console.log('Load complete. Observing recovery until '+new Date(recoveryDeadline).toISOString());
     while(Date.now()<recoveryDeadline){
@@ -308,10 +322,12 @@ try{
       await delay(Math.min(5000,Math.max(0,recoveryDeadline-Date.now())));
     }
   }
+  await stage('complete-runs');
   for(const runId of runIds){
     await sdk('POST',`/runs/${runId}/complete`);
     assert.equal((await sdk('GET',`/runs/${runId}`)).status,'COMPLETED');
   }
+  await stage('persistence-check');
   const countsSql=[['runs','run_entity'],['metrics','run_metric_entity'],['logs','run_log_entity'],['texts','run_text_entity'],['system','run_system_metric_entity'],['parameters','run_parameter_entity'],['artifacts','run_artifact_entity']]
     .map(([name,table])=>table==='run_entity'?`SELECT '${name}',COUNT(*) FROM run_entity WHERE project_id=${projectId};`:
       `SELECT '${name}',COUNT(*) FROM ${table} t JOIN run_entity r ON r.id=t.run_id WHERE r.project_id=${projectId};`).join('\n');
@@ -320,12 +336,30 @@ try{
   report.expectedCounts={runs:10,metrics:20+2*(counters.sdk_metric_batches??0),logs:counters.sdk_log_records??0,
     texts:counters.sdk_text_records??0,system:counters.sdk_system_records??0,parameters:20,artifacts:counters.sdk_artifacts??0};
   assert.deepEqual(report.databaseCounts,report.expectedCounts,'Persisted counts must match successful writes; retries must not duplicate records');
+  if(profile.summaryThresholds){
+    const rows=Number(sql(`SELECT COUNT(*) FROM run_metric_summary s JOIN run_entity r ON r.id=s.run_id WHERE r.project_id=${projectId};`));
+    const mismatches=Number(sql(`SELECT COUNT(*) FROM (
+      SELECT id,run_id,metric_key,MAX(step) OVER (PARTITION BY run_id,metric_key) max_step,
+             ROW_NUMBER() OVER (PARTITION BY run_id,metric_key ORDER BY recorded_at DESC,id DESC) rn
+      FROM run_metric_entity WHERE run_id IN (SELECT id FROM run_entity WHERE project_id=${projectId})
+    ) original LEFT JOIN run_metric_summary s ON s.run_id=original.run_id AND s.metric_key=original.metric_key
+    WHERE original.rn=1 AND (s.latest_metric_id IS NULL OR s.latest_metric_id<>original.id OR NOT(s.max_step<=>original.max_step));`));
+    assert.equal(rows,20,'Ten runs must have two metric summaries each');
+    assert.equal(mismatches,0,'Every summary must match the original time/id and maximum-step aggregate');
+    report.projectionValidation={rows,mismatches,passed:true};
+  }
   report.persistenceVerified=true;
-  await web('POST','/api/v1/auth/refresh');await web('GET','/api/v1/auth/me');
-  await sample();
+  report.postLoadChecks={refresh:false,me:false,metrics:false};
+  await stage('post-load-refresh');
+  await web('POST','/api/v1/auth/refresh');report.postLoadChecks.refresh=true;
+  await stage('post-load-me');
+  await web('GET','/api/v1/auth/me');report.postLoadChecks.me=true;
+  await stage('post-load-metrics');
+  await sample();report.postLoadChecks.metrics=true;
 }catch(error){
   failures.push(error.stack??error.message);console.error(error.message);
 }finally{
+  await stage('cleanup');
   if(activeChild)activeChild.kill('SIGKILL');
   if(sessionRelay)await new Promise(resolve=>sessionRelay.close(resolve));
   if(projectId){
@@ -356,8 +390,9 @@ try{
   report.finishedAt=new Date().toISOString();
   report.failures=failures;report.passed=failures.length===0;
   try{
+    await stage('archive-metrics');
     report.timeSeries={};
-    for(const [name,expr] of Object.entries(metrics))report.timeSeries[name]=await prom(expr,Math.floor(createdAt/1000),Math.ceil(Date.now()/1000));
+    for(const [name,expr] of Object.entries(metrics))report.timeSeries[name]=await prom(expr,Math.floor(createdAt/1000),Math.ceil(Date.now()/1000),name);
     await writeFile(path.join(cycleDirectory,'server-timeseries.json'),JSON.stringify(report.timeSeries,null,2));
   }catch(error){failures.push('Metric archive: '+error.message);report.passed=false;}
   report.grafanaUrl='http://localhost:3000/d/labflow-performance?from='+createdAt+'&to='+Date.now();

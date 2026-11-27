@@ -1,4 +1,4 @@
-param([ValidateSet('smoke', 'soak', 'soak-check')][string]$Profile = 'smoke')
+param([ValidateSet('smoke', 'soak', 'soak-check', 'summary-30m')][string]$Profile = 'smoke')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Add-Type -Namespace LabFlow -Name LoadTestPowerState -MemberDefinition @'
