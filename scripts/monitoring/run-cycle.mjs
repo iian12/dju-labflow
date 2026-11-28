@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { loadProfile } from './load-profile.mjs';
 import { observeHttp } from './observe-http.mjs';
+import { runCommand } from './run-command.mjs';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const profile=loadProfile(process.env.LABFLOW_LOAD_PROFILE || 'smoke');
@@ -144,11 +145,11 @@ async function connectivityProbe(){
   }));
   (report.connectivityProbes??=[]).push(result);return result;
 }
-function sql(text){
-  return execFileSync('C:/Windows/System32/OpenSSH/ssh.exe',[
+async function sql(text){
+  return (await runCommand('C:/Windows/System32/OpenSSH/ssh.exe',[
     '-p','2222','-o','BatchMode=yes','ian@iian12.ddns.net',
     'mariadb --no-defaults --socket=/run/user/1000/labflow-mariadb.sock -u ian labflow --batch --skip-column-names'
-  ],{input:text,encoding:'utf8',timeout:30000}).trim();
+  ],{input:text,timeout:30000})).trim();
 }
 async function rawStatistics(){
   const endpoints={},counters={},windows={},statuses={},sessionClients={};
@@ -331,14 +332,14 @@ try{
   const countsSql=[['runs','run_entity'],['metrics','run_metric_entity'],['logs','run_log_entity'],['texts','run_text_entity'],['system','run_system_metric_entity'],['parameters','run_parameter_entity'],['artifacts','run_artifact_entity']]
     .map(([name,table])=>table==='run_entity'?`SELECT '${name}',COUNT(*) FROM run_entity WHERE project_id=${projectId};`:
       `SELECT '${name}',COUNT(*) FROM ${table} t JOIN run_entity r ON r.id=t.run_id WHERE r.project_id=${projectId};`).join('\n');
-  report.databaseCounts=Object.fromEntries(sql(countsSql).split(/\r?\n/).map(line=>{const [name,value]=line.split('\t');return[name,Number(value)];}));
+  report.databaseCounts=Object.fromEntries((await sql(countsSql)).split(/\r?\n/).map(line=>{const [name,value]=line.split('\t');return[name,Number(value)];}));
   const counters=report.raw.counters;
   report.expectedCounts={runs:10,metrics:20+2*(counters.sdk_metric_batches??0),logs:counters.sdk_log_records??0,
     texts:counters.sdk_text_records??0,system:counters.sdk_system_records??0,parameters:20,artifacts:counters.sdk_artifacts??0};
   assert.deepEqual(report.databaseCounts,report.expectedCounts,'Persisted counts must match successful writes; retries must not duplicate records');
   if(profile.summaryThresholds){
-    const rows=Number(sql(`SELECT COUNT(*) FROM run_metric_summary s JOIN run_entity r ON r.id=s.run_id WHERE r.project_id=${projectId};`));
-    const mismatches=Number(sql(`SELECT COUNT(*) FROM (
+    const rows=Number(await sql(`SELECT COUNT(*) FROM run_metric_summary s JOIN run_entity r ON r.id=s.run_id WHERE r.project_id=${projectId};`));
+    const mismatches=Number(await sql(`SELECT COUNT(*) FROM (
       SELECT id,run_id,metric_key,MAX(step) OVER (PARTITION BY run_id,metric_key) max_step,
              ROW_NUMBER() OVER (PARTITION BY run_id,metric_key ORDER BY recorded_at DESC,id DESC) rn
       FROM run_metric_entity WHERE run_id IN (SELECT id FROM run_entity WHERE project_id=${projectId})
@@ -372,8 +373,8 @@ try{
   try{await web('POST','/api/v1/auth/logout');report.cleanup.loggedOut=true;}catch(error){failures.push('Logout: '+error.message);}
   try{
     const guard=`u.id=${credentials.id} AND u.email='${credentials.email}'`;
-    sql(`START TRANSACTION;\nDELETE t FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE ${guard};\nDELETE v FROM email_verifications v JOIN users u ON u.id=v.user_id WHERE ${guard};\nDELETE u FROM users u WHERE ${guard} AND NOT EXISTS(SELECT 1 FROM project_entity p WHERE p.created_by=u.id);\nCOMMIT;`);
-    const remaining=sql(`SELECT COUNT(*) FROM users WHERE id=${credentials.id};`);
+    await sql(`START TRANSACTION;\nDELETE t FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE ${guard};\nDELETE v FROM email_verifications v JOIN users u ON u.id=v.user_id WHERE ${guard};\nDELETE u FROM users u WHERE ${guard} AND NOT EXISTS(SELECT 1 FROM project_entity p WHERE p.created_by=u.id);\nCOMMIT;`);
+    const remaining=await sql(`SELECT COUNT(*) FROM users WHERE id=${credentials.id};`);
     assert.equal(remaining,'0');report.cleanup.testUserDeleted=true;
   }catch(error){failures.push('Temporary user cleanup: '+error.message);}
   if(controlTunnel && controlTunnel.exitCode===null && controlTunnel.signalCode===null){

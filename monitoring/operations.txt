@@ -88,6 +88,25 @@ First endurance test (same fixture and functional preparation as above):
   its control listener starts is allowed during startup. report.failures remains
   the list of errors that affect the overall verdict.
   Check the new diagnostics with: node --test scripts/monitoring/observe-http.test.mjs
+  SSH/SQL verification uses run-command.mjs and asynchronous spawn. Do not replace
+  this with execFileSync while pooled HTTP connections are in use: a blocked event
+  loop cannot process idle socket closure before the next control POST.
+  A bounded comparison is available in compare-control-sockets.mjs. It needs the
+  normal temporary fixture account and a corrected candidate gateway on Pi
+  loopback 15175; it opens PC forwards 15174/15175 and cleans up its own account.
+  Four variants run three times with the same SQL and 7.2-second idle interval:
+  synchronous/pooled, asynchronous/pooled, synchronous/fresh, corrected-proxy/sync.
+  socket-comparison.json and socket-events.json record the outcome and local ports;
+  a failed refresh is never retried. Experiment validity is separate from which
+  candidate succeeds. The header-only candidate can still fail with blocking I/O.
+  Stop the temporary gateway after comparison; production 5174 is not replaced.
+
+Gateway packaging:
+  Ship both scripts/serve-external.mjs and scripts/proxy-headers.mjs in the release.
+  The gateway removes hop-by-hop headers and Connection-nominated fields in both
+  directions; Node generates the connection headers for its own transport hop.
+  Test with: node --test scripts/proxy-headers.test.mjs scripts/proxy-headers.integration.test.mjs scripts/serve-external.test.mjs
+  Async subprocess tests: node --test scripts/monitoring/run-command.test.mjs
   Stops: temperature >=80 C, Pi available RAM <200 MiB, NVMe free <5 GiB,
   PC recording disk free <2 GiB, three consecutive monitoring/session failures,
   or active run deadline. The soak profile records transient HTTP failures for
