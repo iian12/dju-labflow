@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises'
 import { dirname, extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isIP } from 'node:net'
+import { withoutHopByHop } from './proxy-headers.mjs'
 
 // Serve compiled assets only; development sources and environment files stay private.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../frontend/dist')
@@ -29,7 +30,7 @@ const server = http.createServer(async (request, response) => {
           response.writeHead(403).end(); return
         }
       }
-      const headers = { ...request.headers, host: upstream.host }
+      const headers = { ...withoutHopByHop(request.headers), host: upstream.host }
       delete headers.origin
       delete headers['forwarded']
       delete headers['x-forwarded-for']
@@ -43,7 +44,7 @@ const server = http.createServer(async (request, response) => {
       headers['x-forwarded-proto'] = 'https'
       headers['x-forwarded-host'] = request.headers.host
       const proxy = http.request(new URL(url.pathname + url.search, upstream), { method: request.method, headers, timeout: 30000 }, result => {
-        response.writeHead(result.statusCode, { ...result.headers, 'cache-control': 'no-store' })
+        response.writeHead(result.statusCode, { ...withoutHopByHop(result.headers), 'cache-control': 'no-store' })
         result.pipe(response)
       })
       proxy.on('timeout', () => proxy.destroy())
